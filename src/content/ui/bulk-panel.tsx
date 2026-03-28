@@ -1,4 +1,4 @@
-import { render, h } from 'preact';
+import { render } from 'preact';
 import { useState, useEffect, useRef } from 'preact/hooks';
 import type { VideoInfo } from '../../adapters/types';
 
@@ -21,6 +21,7 @@ function BulkPanel({ onDownloadSelected, onClose }: BulkPanelProps) {
 
   useEffect(() => {
     function handleMessage(e: MessageEvent) {
+      if (e.origin !== window.location.origin) return;
       if (e.data?.type !== '__SD_VIDEO_FOUND__') return;
       const info = e.data.payload as VideoInfo;
       setVideos(prev => {

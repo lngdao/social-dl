@@ -15,10 +15,16 @@ export default defineConfig({
       '*://*.facebook.com/*',
       '*://*.instagram.com/*',
       '*://*.tiktok.com/*',
+      '*://*.tiktokv.com/*',
       '*://*.fbcdn.net/*',
       '*://*.cdninstagram.com/*',
       '*://*.tiktokcdn.com/*',
     ],
+    // NOTE: ffmpeg is currently loaded from unpkg.com CDN (wasm-unsafe-eval required for wasm).
+    // TODO: Bundle the wasm files locally to remove the CDN dependency.
+    content_security_policy: {
+      extension_pages: "script-src 'self' 'wasm-unsafe-eval'; connect-src 'self' https://unpkg.com;",
+    },
     side_panel: { default_path: 'sidepanel.html' },
   },
 });

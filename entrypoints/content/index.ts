@@ -35,15 +35,28 @@ export default defineContentScript({
 
     adapter.installFetchInterceptor(handleVideoFound);
 
-    const observer = new MutationObserver(() => {
+    // Detect SPA navigation
+    let lastUrl = window.location.href;
+    function checkNavigation() {
+      if (window.location.href === lastUrl) return;
+      lastUrl = window.location.href;
       const newDetected = detectPlatform(window.location.href);
-      if (!newDetected || newDetected.pageType !== detected.pageType) {
+      if (!newDetected || newDetected.pageType !== 'single') {
         hideSingleDownloadButton();
       }
-    });
-    if (document.body) observer.observe(document.body, { childList: true, subtree: false });
-    else document.addEventListener('DOMContentLoaded', () => {
-      observer.observe(document.body, { childList: true, subtree: false });
-    });
+    }
+
+    // Monkey-patch pushState/replaceState for SPA navigation
+    const origPushState = history.pushState.bind(history);
+    const origReplaceState = history.replaceState.bind(history);
+    history.pushState = function (...args) {
+      origPushState(...args);
+      checkNavigation();
+    };
+    history.replaceState = function (...args) {
+      origReplaceState(...args);
+      checkNavigation();
+    };
+    window.addEventListener('popstate', checkNavigation);
   },
 });

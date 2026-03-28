@@ -20,9 +20,9 @@ export default defineBackground(() => {
   }
 
   async function executeJob(job: DownloadJob, onProgress: (p: number) => void): Promise<void> {
-    const quality: VideoQuality | undefined = job.videoInfo.qualities.find(
-      q => q.label === job.selectedQuality,
-    ) ?? job.videoInfo.qualities[0];
+    const quality: VideoQuality | undefined = job.selectedQuality === 'highest'
+      ? job.videoInfo.qualities[0]
+      : job.videoInfo.qualities.find(q => q.label === job.selectedQuality) ?? job.videoInfo.qualities[0];
     if (!quality) throw new Error('No quality available');
 
     if (quality.type === 'dash' && quality.audioUrl) {
@@ -35,6 +35,7 @@ export default defineBackground(() => {
         filename: `${job.videoInfo.platform}_${job.videoInfo.id}.mp4`,
         saveAs: false,
       });
+      setTimeout(() => URL.revokeObjectURL(blobUrl), 60_000);
     } else {
       await chrome.downloads.download({
         url: quality.url,

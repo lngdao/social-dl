@@ -22,6 +22,7 @@ export default defineContentScript({
     }
 
     window.addEventListener('message', (e: MessageEvent) => {
+      if (e.origin !== window.location.origin) return;
       if (e.data?.type !== '__SD_DOWNLOAD__') return;
       const { videoInfo, quality } = e.data.payload as { videoInfo: VideoInfo; quality: string };
       chrome.runtime.sendMessage({
