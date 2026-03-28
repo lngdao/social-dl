@@ -42,5 +42,5 @@ export async function mergeDashToMp4(
   await ffmpeg.deleteFile('output.mp4');
   onProgress(100);
 
-  return new Blob([data], { type: 'video/mp4' });
+  return new Blob([data as BlobPart], { type: 'video/mp4' });
 }
