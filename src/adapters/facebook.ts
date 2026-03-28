@@ -17,14 +17,46 @@ interface DashPrefetch {
   nextgendash?: boolean;
 }
 
+interface VideoMeta {
+  shareableUrl?: string;
+  thumbnail?: string;
+  title?: string;
+}
+
+function log(...args: unknown[]) {
+  console.log('[SD]', ...args);
+}
+
+/**
+ * Extract thumbnail URL from a media node.
+ * Facebook stores thumbnails in various fields.
+ */
+function extractThumbnail(media: Record<string, unknown>): string {
+  // Try preferred_thumbnail.image.uri
+  const pt = media.preferred_thumbnail as Record<string, unknown> | undefined;
+  if (pt) {
+    const img = pt.image as Record<string, unknown> | undefined;
+    if (typeof img?.uri === 'string') return img.uri;
+  }
+  // Try thumbnailImage.uri
+  const ti = media.thumbnailImage as Record<string, unknown> | undefined;
+  if (typeof ti?.uri === 'string') return ti.uri;
+  // Try photo_image.uri (common in reels)
+  const pi = media.photo_image as Record<string, unknown> | undefined;
+  if (typeof pi?.uri === 'string') return pi.uri;
+  // Try full_width_image
+  const fw = media.full_width_image as Record<string, unknown> | undefined;
+  if (typeof fw?.uri === 'string') return fw.uri;
+  return '';
+}
+
 /**
  * Parse a single DASH prefetch item into a VideoInfo.
  * Prefers H264 (avc1) over VP9 for macOS/QuickTime compatibility.
  */
-function parseSingleDash(item: DashPrefetch, sourceUrl: string, shareableUrl?: string): VideoInfo | null {
+function parseSingleDash(item: DashPrefetch, sourceUrl: string, meta?: VideoMeta): VideoInfo | null {
   if (!item.video_id || !item.representations?.length) return null;
 
-  // Separate video and audio by representation_id suffix
   const videoReps = item.representations.filter(r =>
     r.representation_id?.endsWith('v') && r.base_url
   );
@@ -34,46 +66,55 @@ function parseSingleDash(item: DashPrefetch, sourceUrl: string, shareableUrl?: s
 
   if (videoReps.length === 0) return null;
 
-  // Prefer H264 (avc1) over VP9 (vp09) for compatibility
+  // Log codecs available for debugging
+  const codecs = videoReps.map(r => `${r.codecs ?? 'unknown'}@${r.bandwidth ?? '?'}bps`);
+  log(`[Facebook] Video ${item.video_id}: codecs available:`, codecs.join(', '));
+
+  // Prefer H264 (avc1) over VP9 (vp09) for macOS/QuickTime compatibility
   const h264Reps = videoReps.filter(r => r.codecs?.startsWith('avc1'));
   const preferredReps = h264Reps.length > 0 ? h264Reps : videoReps;
 
-  // Sort by bandwidth descending (highest quality first)
+  // Sort by bandwidth descending
   preferredReps.sort((a, b) => (b.bandwidth ?? 0) - (a.bandwidth ?? 0));
 
+  // Find best compatible audio
   const bestAudio = audioReps.find(r => r.codecs?.startsWith('mp4a'))?.base_url ?? audioReps[0]?.base_url;
 
-  const qualities: VideoQuality[] = preferredReps.map((rep, i) => {
+  const qualities: VideoQuality[] = [];
+
+  // First option: best video + audio (DASH, needs merge)
+  if (bestAudio) {
+    qualities.push({
+      label: preferredReps[0].height ? `${preferredReps[0].height}p + audio` : 'HD + audio',
+      url: preferredReps[0].base_url!,
+      type: 'dash',
+      audioUrl: bestAudio,
+    });
+  }
+
+  // Second option: video-only (direct MP4, always works)
+  for (const rep of preferredReps) {
     const height = rep.height;
-    const label = height ? `${height}p` : (i === 0 ? 'HD' : `SD`);
-    return {
+    const label = height ? `${height}p (no audio)` : 'Video only';
+    qualities.push({
       label,
       url: rep.base_url!,
-      type: bestAudio ? 'dash' as const : 'mp4' as const,
-      audioUrl: bestAudio,
-    };
-  });
-
-  // Add a direct MP4 option (highest quality, no audio — but works without ffmpeg)
-  qualities.unshift({
-    label: 'Best (video only)',
-    url: preferredReps[0].base_url!,
-    type: 'mp4',
-  });
+      type: 'mp4',
+    });
+  }
 
   return {
     id: item.video_id,
-    title: 'Facebook Reel',
-    thumbnail: '',
+    title: meta?.title ?? 'Facebook Reel',
+    thumbnail: meta?.thumbnail ?? '',
     qualities,
     platform: 'facebook',
-    sourceUrl: shareableUrl ?? sourceUrl,
+    sourceUrl: meta?.shareableUrl ?? sourceUrl,
   };
 }
 
 /**
  * Parse ALL videos from a Facebook GraphQL response.
- * Returns multiple VideoInfo items (not just one).
  */
 function parseAllVideos(node: Record<string, unknown>, sourceUrl: string): VideoInfo[] {
   const results: VideoInfo[] = [];
@@ -83,22 +124,27 @@ function parseAllVideos(node: Record<string, unknown>, sourceUrl: string): Video
     const dashPrefetch = ext?.all_video_dash_prefetch_representations as DashPrefetch[] | undefined;
     const data = node.data as Record<string, unknown> | undefined;
 
-    // Build a map of video_id → shareable_url from the data
-    const urlMap = new Map<string, string>();
+    // Build maps of video_id → metadata
+    const metaMap = new Map<string, VideoMeta>();
 
     // From data.attachments[0].media
     const attachments = data?.attachments as Array<Record<string, unknown>> | undefined;
     if (attachments?.[0]) {
       const media = attachments[0].media as Record<string, unknown> | undefined;
-      if (media?.id && media?.shareable_url) {
-        urlMap.set(String(media.id), media.shareable_url as string);
+      if (media?.id) {
+        metaMap.set(String(media.id), {
+          shareableUrl: media.shareable_url as string | undefined,
+          thumbnail: extractThumbnail(media),
+        });
       }
     }
 
-    // From data.url
+    // From data.url → extract reel ID
     if (data?.url) {
       const reelMatch = (data.url as string).match(/\/reel\/(\d+)/);
-      if (reelMatch) urlMap.set(reelMatch[1], data.url as string);
+      if (reelMatch && !metaMap.has(reelMatch[1])) {
+        metaMap.set(reelMatch[1], { shareableUrl: data.url as string });
+      }
     }
 
     // From profile edges: data.node.aggregated_fb_shorts.edges
@@ -112,8 +158,12 @@ function parseAllVideos(node: Record<string, unknown>, sourceUrl: string): Video
         const reelAttachments = reelNode.attachments as Array<Record<string, unknown>> | undefined;
         if (reelAttachments?.[0]) {
           const media = reelAttachments[0].media as Record<string, unknown> | undefined;
-          if (media?.id && media?.shareable_url) {
-            urlMap.set(String(media.id), media.shareable_url as string);
+          if (media?.id) {
+            metaMap.set(String(media.id), {
+              shareableUrl: media.shareable_url as string | undefined,
+              thumbnail: extractThumbnail(media),
+              title: (reelNode as Record<string, unknown>)?.message?.text as string | undefined,
+            });
           }
         }
       }
@@ -122,17 +172,16 @@ function parseAllVideos(node: Record<string, unknown>, sourceUrl: string): Video
     // Parse each DASH prefetch item
     if (dashPrefetch) {
       for (const item of dashPrefetch) {
-        const shareableUrl = item.video_id ? urlMap.get(item.video_id) : undefined;
-        const info = parseSingleDash(item, sourceUrl, shareableUrl);
+        const meta = item.video_id ? metaMap.get(item.video_id) : undefined;
+        const info = parseSingleDash(item, sourceUrl, meta);
         if (info) results.push(info);
       }
     }
-  } catch { /* ignore parse errors */ }
+  } catch { /* ignore */ }
 
   return results;
 }
 
-// For backwards compatibility with the adapter interface (returns single VideoInfo)
 function parseVideoNode(node: Record<string, unknown>, sourceUrl: string): VideoInfo | null {
   const all = parseAllVideos(node, sourceUrl);
   return all[0] ?? null;
@@ -155,7 +204,6 @@ export const facebookAdapter: PlatformAdapter & {
       urlPatterns: ['/graphql', 'graph.facebook.com', '/api/graphql'],
       parseVideoNode,
       platformName: 'Facebook',
-      // Use multi-video parser to emit ALL videos per response
       parseAllFromResponse: parseAllVideos,
     }, onVideo);
   },

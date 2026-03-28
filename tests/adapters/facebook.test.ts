@@ -46,13 +46,13 @@ describe('facebookAdapter', () => {
     expect(info).not.toBeNull();
     expect(info!.id).toBe('921974297205353');
     expect(info!.qualities.length).toBeGreaterThanOrEqual(2);
-    // First quality should be "Best (video only)" — direct MP4
-    expect(info!.qualities[0].label).toBe('Best (video only)');
-    expect(info!.qualities[0].type).toBe('mp4');
-    expect(info!.qualities[0].url).toContain('video-hd.mp4');
-    // Second should be 1080p with audio URL (DASH)
-    expect(info!.qualities[1].label).toBe('1080p');
-    expect(info!.qualities[1].type).toBe('dash');
-    expect(info!.qualities[1].audioUrl).toContain('audio.mp4');
+    // First quality should be DASH with audio
+    expect(info!.qualities[0].label).toContain('audio');
+    expect(info!.qualities[0].type).toBe('dash');
+    expect(info!.qualities[0].audioUrl).toContain('audio.mp4');
+    // Should also have video-only options
+    const videoOnly = info!.qualities.find(q => q.type === 'mp4');
+    expect(videoOnly).toBeDefined();
+    expect(videoOnly!.url).toContain('video-hd.mp4');
   });
 });
