@@ -2,7 +2,7 @@ import { defineBackground } from 'wxt/utils/define-background';
 import { DownloadQueue } from '../src/background/download-queue';
 import { addHistoryEntry, getHistory, clearHistory } from '../src/background/history-store';
 import { installRequestInterceptor } from '../src/background/request-interceptor';
-import { mergeDashAndDownload } from '../src/background/ffmpeg-bridge';
+import { downloadViaCobalt } from '../src/background/cobalt-downloader';
 import { getSettings, saveSettings, DEFAULT_SETTINGS } from '../src/shared/storage';
 import type { DownloadJob, VideoQuality } from '../src/adapters/types';
 import type { AnyMessage, ContentToBackground, SidePanelToBackground } from '../src/shared/messages';
@@ -24,34 +24,37 @@ export default defineBackground(() => {
       ? job.videoInfo.qualities[0]
       : job.videoInfo.qualities.find(q => q.label === job.selectedQuality) ?? job.videoInfo.qualities[0];
 
-    console.log('[SD-BG] executeJob:', job.id, 'quality:', quality?.label, 'type:', quality?.type, 'url:', quality?.url?.slice(0, 80));
+    console.log('[SD-BG] executeJob:', job.id, 'quality:', quality?.label, 'type:', quality?.type);
 
     if (!quality) throw new Error('No quality available');
 
-    if (quality.type === 'dash' && quality.audioUrl) {
-      console.log('[SD-BG] DASH merge via offscreen document');
-      job.status = 'merging';
-      broadcastQueueUpdate(queue.getJobs());
-      await mergeDashAndDownload(
-        quality.url,
-        quality.audioUrl,
-        `${job.videoInfo.platform}_${job.videoInfo.id}`,
-        onProgress,
-      );
-    } else {
-      console.log('[SD-BG] Direct MP4 download:', quality.url.slice(0, 120));
+    // Strategy: if we have a sourceUrl (reel page URL), try Cobalt first (handles DASH merge).
+    // Fall back to direct CDN download if Cobalt fails.
+    const sourceUrl = job.videoInfo.sourceUrl;
+    const filename = `${job.videoInfo.platform}_${job.videoInfo.id}`;
+
+    if (sourceUrl && (sourceUrl.includes('/reel/') || sourceUrl.includes('/video/'))) {
       try {
-        const downloadId = await chrome.downloads.download({
-          url: quality.url,
-          filename: `${job.videoInfo.platform}_${job.videoInfo.id}.mp4`,
-          saveAs: false,
-        });
-        console.log('[SD-BG] Download started, id:', downloadId);
+        console.log('[SD-BG] Trying Cobalt for:', sourceUrl);
+        await downloadViaCobalt(sourceUrl, filename, onProgress);
+        return;
       } catch (err) {
-        console.error('[SD-BG] Download failed:', err);
-        throw err;
+        console.warn('[SD-BG] Cobalt failed, falling back to direct download:', err);
       }
+    }
+
+    // Direct CDN download (video-only for DASH, full for MP4)
+    console.log('[SD-BG] Direct download:', quality.url.slice(0, 100));
+    try {
+      await chrome.downloads.download({
+        url: quality.url,
+        filename: `${filename}.mp4`,
+        saveAs: false,
+      });
       onProgress(100);
+    } catch (err) {
+      console.error('[SD-BG] Download failed:', err);
+      throw err;
     }
   }
 
