@@ -1,9 +1,8 @@
 import { defineBackground } from 'wxt/utils/define-background';
 import { DownloadQueue } from '../src/background/download-queue';
 import { addHistoryEntry, getHistory, clearHistory } from '../src/background/history-store';
-// NOTE: ffmpeg.wasm cannot run in MV3 service worker (no Worker constructor).
-// DASH merge is not supported yet — only direct MP4 downloads work.
 import { installRequestInterceptor } from '../src/background/request-interceptor';
+import { mergeDashAndDownload } from '../src/background/ffmpeg-bridge';
 import { getSettings, saveSettings, DEFAULT_SETTINGS } from '../src/shared/storage';
 import type { DownloadJob, VideoQuality } from '../src/adapters/types';
 import type { AnyMessage, ContentToBackground, SidePanelToBackground } from '../src/shared/messages';
@@ -30,20 +29,15 @@ export default defineBackground(() => {
     if (!quality) throw new Error('No quality available');
 
     if (quality.type === 'dash' && quality.audioUrl) {
-      // DASH merge not supported in MV3 service worker — download video-only track
-      console.log('[SD-BG] DASH detected, falling back to video-only download:', quality.url.slice(0, 120));
-      try {
-        const downloadId = await chrome.downloads.download({
-          url: quality.url,
-          filename: `${job.videoInfo.platform}_${job.videoInfo.id}.mp4`,
-          saveAs: false,
-        });
-        console.log('[SD-BG] Download started (video-only), id:', downloadId);
-      } catch (err) {
-        console.error('[SD-BG] Download failed:', err);
-        throw err;
-      }
-      onProgress(100);
+      console.log('[SD-BG] DASH merge via offscreen document');
+      job.status = 'merging';
+      broadcastQueueUpdate(queue.getJobs());
+      await mergeDashAndDownload(
+        quality.url,
+        quality.audioUrl,
+        `${job.videoInfo.platform}_${job.videoInfo.id}`,
+        onProgress,
+      );
     } else {
       console.log('[SD-BG] Direct MP4 download:', quality.url.slice(0, 120));
       try {

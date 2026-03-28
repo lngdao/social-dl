@@ -10,7 +10,7 @@ export default defineConfig({
   manifest: {
     name: 'Social Downloader',
     version: '1.0.0',
-    permissions: ['webRequest', 'storage', 'sidePanel', 'downloads'],
+    permissions: ['webRequest', 'storage', 'sidePanel', 'downloads', 'offscreen'],
     host_permissions: [
       '*://*.facebook.com/*',
       '*://*.instagram.com/*',
@@ -20,11 +20,16 @@ export default defineConfig({
       '*://*.cdninstagram.com/*',
       '*://*.tiktokcdn.com/*',
     ],
-    // NOTE: ffmpeg is currently loaded from unpkg.com CDN (wasm-unsafe-eval required for wasm).
-    // TODO: Bundle the wasm files locally to remove the CDN dependency.
     content_security_policy: {
-      extension_pages: "script-src 'self' 'wasm-unsafe-eval'; connect-src 'self' https://unpkg.com;",
+      extension_pages: "script-src 'self' 'wasm-unsafe-eval'; object-src 'self';",
     },
+    web_accessible_resources: [
+      {
+        resources: ['ffmpeg/ffmpeg-core.js', 'ffmpeg/ffmpeg-core.wasm', 'ffmpeg/ffmpeg-core.worker.js'],
+        matches: ['<all_urls>'],
+        use_dynamic_url: false,
+      },
+    ],
     action: { default_title: 'Social Downloader' },
     side_panel: { default_path: 'sidepanel.html' },
   },

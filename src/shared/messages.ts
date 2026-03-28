@@ -1,5 +1,13 @@
 import type { VideoInfo, DownloadJob, HistoryEntry, Settings } from '../adapters/types';
 
+export enum OffscreenMsg {
+  MERGE_DASH = 'MERGE_DASH',
+  MERGE_DASH_PROGRESS = 'MERGE_DASH_PROGRESS',
+  MERGE_DASH_DONE = 'MERGE_DASH_DONE',
+  MERGE_DASH_ERROR = 'MERGE_DASH_ERROR',
+  REVOKE_BLOB_URL = 'REVOKE_BLOB_URL',
+}
+
 export type ContentToBackground =
   | { type: 'BULK_DOWNLOAD_REQUEST'; payload: { videos: VideoInfo[]; quality: string } };
 
