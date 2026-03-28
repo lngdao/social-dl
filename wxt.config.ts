@@ -25,6 +25,7 @@ export default defineConfig({
     content_security_policy: {
       extension_pages: "script-src 'self' 'wasm-unsafe-eval'; connect-src 'self' https://unpkg.com;",
     },
+    action: { default_title: 'Social Downloader' },
     side_panel: { default_path: 'sidepanel.html' },
   },
 });
