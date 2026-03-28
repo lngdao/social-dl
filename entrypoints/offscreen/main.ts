@@ -1,7 +1,7 @@
 import { FFmpeg } from '@ffmpeg/ffmpeg';
+import { toBlobURL } from '@ffmpeg/util';
 import { OffscreenMsg } from '../../src/shared/messages';
 
-// Relay ALL errors/logs to service worker since we can't inspect offscreen console
 function toSW(msg: object) {
   chrome.runtime.sendMessage(msg, () => { void chrome.runtime.lastError; });
 }
@@ -11,12 +11,11 @@ function logToSW(...args: unknown[]) {
   toSW({ type: 'OFFSCREEN_LOG', payload: msg });
 }
 
-// Catch all unhandled errors and relay to SW
 self.addEventListener('error', (e) => {
-  logToSW('[SD-Offscreen] GLOBAL ERROR:', e.message, e.filename, e.lineno);
+  logToSW('GLOBAL ERROR:', e.message, e.filename, e.lineno);
 });
 self.addEventListener('unhandledrejection', (e) => {
-  logToSW('[SD-Offscreen] UNHANDLED REJECTION:', String(e.reason));
+  logToSW('UNHANDLED REJECTION:', String(e.reason));
 });
 
 let ffmpegInstance: FFmpeg | null = null;
@@ -26,18 +25,25 @@ async function getFFmpeg(): Promise<FFmpeg> {
   logToSW('Loading ffmpeg.wasm...');
   ffmpegInstance = new FFmpeg();
 
+  // Convert local extension files to blob URLs — this ensures the FFmpeg class worker
+  // can load them without path resolution issues in bundled code
   const coreURL = chrome.runtime.getURL('ffmpeg/ffmpeg-core.js');
   const wasmURL = chrome.runtime.getURL('ffmpeg/ffmpeg-core.wasm');
-  logToSW('Core URLs:', coreURL.slice(0, 60), wasmURL.slice(0, 60));
+  logToSW('Converting to blob URLs...');
+  const coreBlobURL = await toBlobURL(coreURL, 'text/javascript');
+  const wasmBlobURL = await toBlobURL(wasmURL, 'application/wasm');
+  logToSW('Blob URLs created, loading ffmpeg...');
 
-  // Use single-threaded core (no workerURL) — multi-threaded hangs in offscreen documents
-  await ffmpegInstance.load({ coreURL, wasmURL });
+  await ffmpegInstance.load({
+    coreURL: coreBlobURL,
+    wasmURL: wasmBlobURL,
+  });
+
   logToSW('ffmpeg.wasm loaded successfully');
   return ffmpegInstance;
 }
 
 let queue: Promise<void> = Promise.resolve();
-
 function enqueue<T>(job: () => Promise<T>): Promise<T> {
   return new Promise<T>((resolve, reject) => {
     queue = queue.then(() => job().then(resolve, reject));
@@ -52,7 +58,7 @@ async function mergeDash(jobId: string, videoUrl: string, audioUrl: string): Pro
   toSW({ type: OffscreenMsg.MERGE_DASH_PROGRESS, payload: { jobId, progress: 0.1 } });
   logToSW('Fetching video...', videoUrl.slice(0, 80));
   const videoResp = await fetch(videoUrl);
-  if (!videoResp.ok) throw new Error(`Video fetch failed: ${videoResp.status} ${videoResp.statusText}`);
+  if (!videoResp.ok) throw new Error(`Video fetch failed: ${videoResp.status}`);
   const videoData = new Uint8Array(await videoResp.arrayBuffer());
   logToSW('Video fetched:', videoData.length, 'bytes');
   await ffmpeg.writeFile('video.mp4', videoData);
@@ -60,7 +66,7 @@ async function mergeDash(jobId: string, videoUrl: string, audioUrl: string): Pro
   toSW({ type: OffscreenMsg.MERGE_DASH_PROGRESS, payload: { jobId, progress: 0.3 } });
   logToSW('Fetching audio...', audioUrl.slice(0, 80));
   const audioResp = await fetch(audioUrl);
-  if (!audioResp.ok) throw new Error(`Audio fetch failed: ${audioResp.status} ${audioResp.statusText}`);
+  if (!audioResp.ok) throw new Error(`Audio fetch failed: ${audioResp.status}`);
   const audioData = new Uint8Array(await audioResp.arrayBuffer());
   logToSW('Audio fetched:', audioData.length, 'bytes');
   await ffmpeg.writeFile('audio.mp4', audioData);

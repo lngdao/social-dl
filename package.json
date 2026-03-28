@@ -18,6 +18,7 @@
     "@ffmpeg/ffmpeg": "^0.12.15",
     "@ffmpeg/util": "^0.12.2",
     "jsdom": "^29.0.1",
+    "mp4box": "^2.3.0",
     "preact": "^10.26.4"
   },
   "devDependencies": {
