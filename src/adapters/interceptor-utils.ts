@@ -155,8 +155,10 @@ export function deepFindVideos(obj: unknown, results: Record<string, unknown>[] 
 interface InterceptorConfig {
   /** URL patterns to intercept */
   urlPatterns: string[];
-  /** Parse a found video node into VideoInfo */
+  /** Parse a found video node into VideoInfo (single result) */
   parseVideoNode: (node: Record<string, unknown>, sourceUrl: string) => VideoInfo | null;
+  /** Optional: parse ALL videos from a single response (returns multiple) */
+  parseAllFromResponse?: (node: Record<string, unknown>, sourceUrl: string) => VideoInfo[];
   /** Platform name for logging */
   platformName: string;
 }
@@ -176,16 +178,27 @@ export function installInterceptors(
     log(`[${config.platformName}] Intercepted ${requestUrl.slice(0, 80)}... — ${jsonObjects.length} JSON object(s)`);
 
     for (const json of jsonObjects) {
-      // Debug: log video-related keys to understand structure
-      const videoKeys = findVideoRelatedKeys(json);
-      if (videoKeys.length > 0) {
-        log(`[${config.platformName}] Video-related keys found:`, videoKeys);
-        if (config.platformName === 'Facebook') {
-          dumpFacebookPaths(json);
+      // Reduce debug noise — only log when no videos found
+      // (debug helpers still available: findVideoRelatedKeys, dumpFacebookPaths)
+
+      // If multi-video parser is available, use it first
+      if (config.parseAllFromResponse) {
+        const allVideos = config.parseAllFromResponse(json as Record<string, unknown>, window.location.href);
+        let newCount = 0;
+        for (const info of allVideos) {
+          if (!seenIds.has(info.id)) {
+            seenIds.add(info.id);
+            newCount++;
+            onVideo(info);
+          }
+        }
+        if (newCount > 0) {
+          log(`[${config.platformName}] Found ${newCount} new video(s) from response (total seen: ${seenIds.size})`);
+          continue;
         }
       }
 
-      // First try the platform-specific parser on the root
+      // Fallback: single-video parser on root
       const directResult = config.parseVideoNode(json as Record<string, unknown>, window.location.href);
       if (directResult && !seenIds.has(directResult.id)) {
         seenIds.add(directResult.id);
@@ -196,12 +209,6 @@ export function installInterceptors(
 
       // Deep search for video nodes
       const videoNodes = deepFindVideos(json);
-      if (videoNodes.length > 0) {
-        log(`[${config.platformName}] Deep search found ${videoNodes.length} video node(s)`);
-        for (const node of videoNodes) {
-          log(`[${config.platformName}] Video node keys:`, Object.keys(node));
-        }
-      }
       for (const node of videoNodes) {
         const info = config.parseVideoNode(node, window.location.href);
         if (info && !seenIds.has(info.id)) {
