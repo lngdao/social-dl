@@ -28,10 +28,10 @@ async function getFFmpeg(): Promise<FFmpeg> {
 
   const coreURL = chrome.runtime.getURL('ffmpeg/ffmpeg-core.js');
   const wasmURL = chrome.runtime.getURL('ffmpeg/ffmpeg-core.wasm');
-  const workerURL = chrome.runtime.getURL('ffmpeg/ffmpeg-core.worker.js');
   logToSW('Core URLs:', coreURL.slice(0, 60), wasmURL.slice(0, 60));
 
-  await ffmpegInstance.load({ coreURL, wasmURL, workerURL });
+  // Use single-threaded core (no workerURL) — multi-threaded hangs in offscreen documents
+  await ffmpegInstance.load({ coreURL, wasmURL });
   logToSW('ffmpeg.wasm loaded successfully');
   return ffmpegInstance;
 }

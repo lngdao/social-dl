@@ -26,7 +26,7 @@ export default defineConfig({
     },
     web_accessible_resources: [
       {
-        resources: ['ffmpeg/ffmpeg-core.js', 'ffmpeg/ffmpeg-core.wasm', 'ffmpeg/ffmpeg-core.worker.js'],
+        resources: ['ffmpeg/ffmpeg-core.js', 'ffmpeg/ffmpeg-core.wasm'],
         matches: ['<all_urls>'],
         use_dynamic_url: false,
       },
