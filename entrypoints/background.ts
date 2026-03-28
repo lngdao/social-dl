@@ -136,7 +136,6 @@ export default defineBackground(() => {
     if (msg.type === 'CANCEL_JOB') { sendResponse({ ok: true }); return true; }
   });
 
-  chrome.action.onClicked.addListener((tab) => {
-    if (tab.id) chrome.sidePanel.open({ tabId: tab.id });
-  });
+  // Open side panel when extension icon is clicked
+  chrome.sidePanel.setPanelBehavior?.({ openPanelOnActionClick: true }).catch(() => {});
 });
