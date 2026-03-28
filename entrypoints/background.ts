@@ -91,7 +91,13 @@ export default defineBackground(() => {
   });
 
   chrome.runtime.onMessage.addListener((message: AnyMessage, _sender, sendResponse) => {
-    const msg = message as ContentToBackground & SidePanelToBackground;
+    const msg = message as any;
+
+    // Relay offscreen logs to SW console
+    if (msg.type === 'OFFSCREEN_LOG') {
+      console.log('[SD-Offscreen]', msg.payload);
+      return false;
+    }
 
     if (msg.type === 'BULK_DOWNLOAD_REQUEST') {
       const { videos, quality } = msg.payload;
