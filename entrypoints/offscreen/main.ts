@@ -1,5 +1,4 @@
 import { FFmpeg } from '@ffmpeg/ffmpeg';
-import { fetchFile } from '@ffmpeg/util';
 import { OffscreenMsg } from '../../src/shared/messages';
 
 let ffmpegInstance: FFmpeg | null = null;
@@ -34,12 +33,18 @@ async function mergeDash(jobId: string, videoUrl: string, audioUrl: string): Pro
 
   toSW({ type: OffscreenMsg.MERGE_DASH_PROGRESS, payload: { jobId, progress: 0.1 } });
   console.log('[SD-Offscreen] Fetching video...', videoUrl.slice(0, 80));
-  const videoData = await fetchFile(videoUrl);
+  const videoResp = await fetch(videoUrl);
+  if (!videoResp.ok) throw new Error(`Video fetch failed: ${videoResp.status}`);
+  const videoData = new Uint8Array(await videoResp.arrayBuffer());
+  console.log('[SD-Offscreen] Video fetched:', videoData.length, 'bytes');
   await ffmpeg.writeFile('video.mp4', videoData);
 
   toSW({ type: OffscreenMsg.MERGE_DASH_PROGRESS, payload: { jobId, progress: 0.3 } });
   console.log('[SD-Offscreen] Fetching audio...', audioUrl.slice(0, 80));
-  const audioData = await fetchFile(audioUrl);
+  const audioResp = await fetch(audioUrl);
+  if (!audioResp.ok) throw new Error(`Audio fetch failed: ${audioResp.status}`);
+  const audioData = new Uint8Array(await audioResp.arrayBuffer());
+  console.log('[SD-Offscreen] Audio fetched:', audioData.length, 'bytes');
   await ffmpeg.writeFile('audio.mp4', audioData);
 
   toSW({ type: OffscreenMsg.MERGE_DASH_PROGRESS, payload: { jobId, progress: 0.5 } });

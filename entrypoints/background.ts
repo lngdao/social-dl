@@ -3,6 +3,7 @@ import { DownloadQueue } from '../src/background/download-queue';
 import { addHistoryEntry, getHistory, clearHistory } from '../src/background/history-store';
 import { installRequestInterceptor } from '../src/background/request-interceptor';
 import { downloadViaCobalt } from '../src/background/cobalt-downloader';
+import { mergeDashAndDownload } from '../src/background/ffmpeg-bridge';
 import { getSettings, saveSettings, DEFAULT_SETTINGS } from '../src/shared/storage';
 import type { DownloadJob, VideoQuality } from '../src/adapters/types';
 import type { AnyMessage, ContentToBackground, SidePanelToBackground } from '../src/shared/messages';
@@ -43,8 +44,22 @@ export default defineBackground(() => {
       }
     }
 
-    // Direct CDN download (video-only for DASH, full for MP4)
-    console.log('[SD-BG] Direct download:', quality.url.slice(0, 100));
+    // DASH: try offscreen ffmpeg merge (video + audio)
+    if (quality.type === 'dash' && quality.audioUrl) {
+      try {
+        console.log('[SD-BG] Trying offscreen DASH merge, video:', quality.url.slice(0, 80));
+        console.log('[SD-BG] Audio:', quality.audioUrl.slice(0, 80));
+        job.status = 'merging';
+        broadcastQueueUpdate(queue.getJobs());
+        await mergeDashAndDownload(quality.url, quality.audioUrl, filename, onProgress);
+        return;
+      } catch (err) {
+        console.warn('[SD-BG] Offscreen merge failed, falling back to video-only:', err);
+      }
+    }
+
+    // Final fallback: direct CDN download (video-only for DASH)
+    console.log('[SD-BG] Direct download (video-only):', quality.url.slice(0, 100));
     try {
       await chrome.downloads.download({
         url: quality.url,
