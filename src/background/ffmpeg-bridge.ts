@@ -7,18 +7,10 @@ export async function mergeDashAndDownload(
   filename: string,
   onProgress: (p: number) => void,
 ): Promise<void> {
-  // Fetch in service worker — has host_permissions for fbcdn.net / cdninstagram.com etc.
-  console.log('[SD-BG] Fetching video track...');
-  onProgress(10);
-  const videoData = await fetch(videoUrl).then(r => r.arrayBuffer());
-  onProgress(30);
-  console.log('[SD-BG] Fetching audio track...');
-  const audioData = await fetch(audioUrl).then(r => r.arrayBuffer());
-  onProgress(50);
-
   await ensureOffscreenDocument();
 
   const jobId = `dash_${Date.now()}`;
+  onProgress(10);
 
   return new Promise<void>((resolve, reject) => {
     let settled = false;
@@ -33,7 +25,10 @@ export async function mergeDashAndDownload(
     const listener = (message: any) => {
       if (message.payload?.jobId !== jobId) return;
 
-      if (message.type === OffscreenMsg.MERGE_DASH_DONE) {
+      if (message.type === OffscreenMsg.MERGE_DASH_PROGRESS) {
+        const p = Math.round(message.payload.progress * 100);
+        onProgress(Math.min(90, 10 + p * 0.8));
+      } else if (message.type === OffscreenMsg.MERGE_DASH_DONE) {
         if (settled) return;
         settled = true;
         clearTimeout(timeout);
@@ -61,14 +56,11 @@ export async function mergeDashAndDownload(
 
     chrome.runtime.onMessage.addListener(listener);
 
-    // ArrayBuffers cannot be transferred over sendMessage — convert to plain arrays
+    // Pass URLs directly — offscreen document has same host_permissions as the extension
+    // This avoids massive ArrayBuffer serialization over chrome.runtime.sendMessage
     chrome.runtime.sendMessage({
       type: OffscreenMsg.MERGE_DASH,
-      payload: {
-        jobId,
-        videoData: Array.from(new Uint8Array(videoData)),
-        audioData: Array.from(new Uint8Array(audioData)),
-      },
+      payload: { jobId, videoUrl, audioUrl },
     });
   });
 }

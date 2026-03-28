@@ -3,8 +3,8 @@ import { useState, useEffect, useRef } from 'preact/hooks';
 import type { VideoInfo } from '../../adapters/types';
 
 const QUALITY_OPTIONS = ['highest', '1080p', '720p', '360p'];
-const SCAN_DURATION_MS = 120_000; // 2 minutes
-const SCROLL_INTERVAL_MS = 1000; // scroll faster
+const SCROLL_INTERVAL_MS = 1500;
+const NO_NEW_VIDEO_STOP_AFTER = 10; // stop after N scroll cycles with no new video
 
 interface BulkPanelProps {
   onDownloadSelected: (videos: VideoInfo[], quality: string) => void;
@@ -16,10 +16,12 @@ function BulkPanel({ onDownloadSelected, onClose }: BulkPanelProps) {
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [quality, setQuality] = useState('highest');
   const [scanning, setScanning] = useState(true);
-  const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const scrollRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   useEffect(() => {
+    let lastCount = 0;
+    let staleScrollCycles = 0;
+
     function handleMessage(e: MessageEvent) {
       if (e.origin !== window.location.origin) return;
       if (e.data?.type !== '__SD_VIDEO_FOUND__') return;
@@ -32,18 +34,26 @@ function BulkPanel({ onDownloadSelected, onClose }: BulkPanelProps) {
     window.addEventListener('message', handleMessage);
 
     scrollRef.current = setInterval(() => {
+      // Check if we found new videos since last scroll
+      setVideos(prev => {
+        if (prev.length === lastCount) {
+          staleScrollCycles++;
+          if (staleScrollCycles >= NO_NEW_VIDEO_STOP_AFTER) {
+            setScanning(false);
+            if (scrollRef.current) clearInterval(scrollRef.current);
+          }
+        } else {
+          staleScrollCycles = 0;
+          lastCount = prev.length;
+        }
+        return prev;
+      });
       window.scrollBy(0, window.innerHeight * 0.8);
     }, SCROLL_INTERVAL_MS);
-
-    timerRef.current = setTimeout(() => {
-      setScanning(false);
-      if (scrollRef.current) clearInterval(scrollRef.current);
-    }, SCAN_DURATION_MS);
 
     return () => {
       window.removeEventListener('message', handleMessage);
       if (scrollRef.current) clearInterval(scrollRef.current);
-      if (timerRef.current) clearTimeout(timerRef.current);
     };
   }, []);
 
