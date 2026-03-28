@@ -3,8 +3,8 @@ import { useState, useEffect, useRef } from 'preact/hooks';
 import type { VideoInfo } from '../../adapters/types';
 
 const QUALITY_OPTIONS = ['highest', '1080p', '720p', '360p'];
-const SCAN_DURATION_MS = 30_000;
-const SCROLL_INTERVAL_MS = 1500;
+const SCAN_DURATION_MS = 120_000; // 2 minutes
+const SCROLL_INTERVAL_MS = 1000; // scroll faster
 
 interface BulkPanelProps {
   onDownloadSelected: (videos: VideoInfo[], quality: string) => void;

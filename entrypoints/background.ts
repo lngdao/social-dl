@@ -23,25 +23,37 @@ export default defineBackground(() => {
     const quality: VideoQuality | undefined = job.selectedQuality === 'highest'
       ? job.videoInfo.qualities[0]
       : job.videoInfo.qualities.find(q => q.label === job.selectedQuality) ?? job.videoInfo.qualities[0];
+
+    console.log('[SD-BG] executeJob:', job.id, 'quality:', quality?.label, 'type:', quality?.type, 'url:', quality?.url?.slice(0, 80));
+
     if (!quality) throw new Error('No quality available');
 
     if (quality.type === 'dash' && quality.audioUrl) {
+      console.log('[SD-BG] DASH merge needed, video:', quality.url.slice(0, 80), 'audio:', quality.audioUrl.slice(0, 80));
       job.status = 'merging';
       broadcastQueueUpdate(queue.getJobs());
       const blob = await mergeDashToMp4(quality.url, quality.audioUrl, onProgress);
       const blobUrl = URL.createObjectURL(blob);
-      await chrome.downloads.download({
+      const downloadId = await chrome.downloads.download({
         url: blobUrl,
         filename: `${job.videoInfo.platform}_${job.videoInfo.id}.mp4`,
         saveAs: false,
       });
+      console.log('[SD-BG] Download started, id:', downloadId);
       setTimeout(() => URL.revokeObjectURL(blobUrl), 60_000);
     } else {
-      await chrome.downloads.download({
-        url: quality.url,
-        filename: `${job.videoInfo.platform}_${job.videoInfo.id}.mp4`,
-        saveAs: false,
-      });
+      console.log('[SD-BG] Direct MP4 download:', quality.url.slice(0, 120));
+      try {
+        const downloadId = await chrome.downloads.download({
+          url: quality.url,
+          filename: `${job.videoInfo.platform}_${job.videoInfo.id}.mp4`,
+          saveAs: false,
+        });
+        console.log('[SD-BG] Download started, id:', downloadId);
+      } catch (err) {
+        console.error('[SD-BG] Download failed:', err);
+        throw err;
+      }
       onProgress(100);
     }
   }
@@ -68,6 +80,7 @@ export default defineBackground(() => {
 
     if (msg.type === 'BULK_DOWNLOAD_REQUEST') {
       const { videos, quality } = msg.payload;
+      console.log('[SD-BG] BULK_DOWNLOAD_REQUEST received:', videos.length, 'videos, quality:', quality);
       videos.forEach((v, i) => {
         queue.add({
           id: `${v.id}-${Date.now()}-${i}`,

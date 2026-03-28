@@ -14,9 +14,12 @@ export default defineContentScript({
 
     if (detected.pageType === 'profile') {
       showBulkPanel((videos: VideoInfo[], quality: string) => {
+        console.log('[SD] Sending BULK_DOWNLOAD_REQUEST:', videos.length, 'videos, quality:', quality);
         chrome.runtime.sendMessage({
           type: 'BULK_DOWNLOAD_REQUEST',
           payload: { videos, quality },
+        }, (response) => {
+          console.log('[SD] Background response:', response, chrome.runtime.lastError);
         });
       });
     }
