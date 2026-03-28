@@ -37,6 +37,87 @@ export function parseResponseText(text: string): unknown[] {
 }
 
 /**
+ * Find all keys matching video-related patterns in an object tree.
+ * Used for debugging to understand response structure.
+ */
+export function findVideoRelatedKeys(obj: unknown, path = '', results: string[] = [], depth = 0): string[] {
+  if (depth > 8 || !obj || typeof obj !== 'object') return results;
+
+  const o = obj as Record<string, unknown>;
+  const VIDEO_KEY_PATTERNS = /video|playable|play_addr|mp4|dash|stream|media|reel|representation|delivery|base_url|url/i;
+
+  for (const [key, value] of Object.entries(o)) {
+    const currentPath = path ? `${path}.${key}` : key;
+    if (VIDEO_KEY_PATTERNS.test(key)) {
+      const valType = Array.isArray(value) ? `array[${value.length}]` : typeof value;
+      const preview = typeof value === 'string' ? value.slice(0, 120) : valType;
+      results.push(`${currentPath} = ${preview}`);
+    }
+    if (value && typeof value === 'object' && !Array.isArray(value)) {
+      findVideoRelatedKeys(value, currentPath, results, depth + 1);
+    }
+    if (Array.isArray(value) && value.length > 0 && value.length < 20) {
+      findVideoRelatedKeys(value[0], `${currentPath}[0]`, results, depth + 1);
+    }
+  }
+  return results;
+}
+
+/**
+ * Debug: dump specific Facebook paths to find actual video URLs.
+ */
+export function dumpFacebookPaths(obj: unknown): void {
+  const o = obj as Record<string, unknown>;
+
+  // Path 1: extensions.all_video_dash_prefetch_representations
+  const ext = o?.extensions as Record<string, unknown>;
+  const dashReps = ext?.all_video_dash_prefetch_representations as unknown[];
+  if (dashReps?.length) {
+    const first = dashReps[0] as Record<string, unknown>;
+    log('[FB-DEBUG] DASH representation[0] keys:', Object.keys(first));
+    log('[FB-DEBUG] DASH representation[0]:', JSON.stringify(first).slice(0, 500));
+  }
+
+  // Path 2: data.attachments[0].media
+  const data = o?.data as Record<string, unknown>;
+  const attachments = data?.attachments as unknown[];
+  if (attachments?.length) {
+    const media = (attachments[0] as Record<string, unknown>)?.media as Record<string, unknown>;
+    if (media) {
+      log('[FB-DEBUG] media keys:', Object.keys(media));
+      const video = media?.video as Record<string, unknown>;
+      if (video) {
+        log('[FB-DEBUG] media.video keys:', Object.keys(video));
+        const dr = video?.delivery_response as Record<string, unknown>;
+        if (dr) {
+          log('[FB-DEBUG] delivery_response keys:', Object.keys(dr));
+          log('[FB-DEBUG] delivery_response:', JSON.stringify(dr).slice(0, 1000));
+        }
+      }
+    }
+  }
+
+  // Path 3: data.video
+  const dataVideo = data?.video as Record<string, unknown>;
+  if (dataVideo) {
+    log('[FB-DEBUG] data.video keys:', Object.keys(dataVideo));
+    // Check for playable URLs at various depths
+    for (const key of Object.keys(dataVideo)) {
+      const val = dataVideo[key];
+      if (typeof val === 'string' && (val.includes('fbcdn') || val.includes('.mp4'))) {
+        log('[FB-DEBUG] data.video.' + key + ' =', val.slice(0, 200));
+      }
+    }
+  }
+
+  // Path 4: node.video (for when we have a media/attachment node)
+  const nodeVideo = o?.video as Record<string, unknown>;
+  if (nodeVideo && nodeVideo !== dataVideo) {
+    log('[FB-DEBUG] node.video keys:', Object.keys(nodeVideo));
+  }
+}
+
+/**
  * Deep search an object tree for keys that indicate video content.
  * Facebook nests video data deeply with varying structures.
  */
@@ -47,10 +128,11 @@ export function deepFindVideos(obj: unknown, results: Record<string, unknown>[] 
 
   // Check if this object looks like a video node
   const hasVideoUrl = typeof o.playable_url === 'string' || typeof o.playable_url_quality_hd === 'string';
+  const hasBrowserUrl = typeof o.browser_native_hd_url === 'string' || typeof o.browser_native_sd_url === 'string';
   const hasVideoVersions = Array.isArray(o.video_versions);
   const hasPlayAddr = typeof (o.video as Record<string, unknown>)?.playAddr === 'string';
 
-  if (hasVideoUrl || hasVideoVersions || hasPlayAddr) {
+  if (hasVideoUrl || hasBrowserUrl || hasVideoVersions || hasPlayAddr) {
     results.push(o);
   }
 
@@ -94,6 +176,15 @@ export function installInterceptors(
     log(`[${config.platformName}] Intercepted ${requestUrl.slice(0, 80)}... — ${jsonObjects.length} JSON object(s)`);
 
     for (const json of jsonObjects) {
+      // Debug: log video-related keys to understand structure
+      const videoKeys = findVideoRelatedKeys(json);
+      if (videoKeys.length > 0) {
+        log(`[${config.platformName}] Video-related keys found:`, videoKeys);
+        if (config.platformName === 'Facebook') {
+          dumpFacebookPaths(json);
+        }
+      }
+
       // First try the platform-specific parser on the root
       const directResult = config.parseVideoNode(json as Record<string, unknown>, window.location.href);
       if (directResult && !seenIds.has(directResult.id)) {
@@ -105,6 +196,12 @@ export function installInterceptors(
 
       // Deep search for video nodes
       const videoNodes = deepFindVideos(json);
+      if (videoNodes.length > 0) {
+        log(`[${config.platformName}] Deep search found ${videoNodes.length} video node(s)`);
+        for (const node of videoNodes) {
+          log(`[${config.platformName}] Video node keys:`, Object.keys(node));
+        }
+      }
       for (const node of videoNodes) {
         const info = config.parseVideoNode(node, window.location.href);
         if (info && !seenIds.has(info.id)) {
