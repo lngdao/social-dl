@@ -7,6 +7,7 @@ export const DEFAULT_SETTINGS: Settings = {
   concurrency: 3,
   defaultQuality: 'highest',
   mergeMethod: 'mp4box',
+  includeAudio: true,
   cobaltInstance: 'https://cobalt-backend.canine.tools',
   cobaltApiKey: '',
 };

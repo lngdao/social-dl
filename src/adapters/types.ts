@@ -44,6 +44,7 @@ export interface Settings {
   concurrency: number;
   defaultQuality: string;
   mergeMethod: MergeMethod;
+  includeAudio: boolean;
   cobaltInstance: string;
   cobaltApiKey: string;
 }

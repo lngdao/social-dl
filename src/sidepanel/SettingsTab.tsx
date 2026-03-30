@@ -49,6 +49,28 @@ export function SettingsTab({ settings, onUpdate }: SettingsTabProps) {
         </select>
       </div>
 
+      {/* Include Audio */}
+      <div class="flex items-center justify-between">
+        <div>
+          <label class="text-sm font-semibold text-gray-200">Include Audio</label>
+          <p class="text-xs text-gray-500 mt-0.5">Merge audio track into video (DASH streams)</p>
+        </div>
+        <button
+          onClick={() => onUpdate({ includeAudio: !(settings.includeAudio ?? DEFAULT_SETTINGS.includeAudio) })}
+          class={[
+            'relative inline-flex h-6 w-11 items-center rounded-full transition-colors',
+            (settings.includeAudio ?? DEFAULT_SETTINGS.includeAudio) ? 'bg-blue-600' : 'bg-gray-600',
+          ].join(' ')}
+        >
+          <span
+            class={[
+              'inline-block h-4 w-4 rounded-full bg-white transition-transform',
+              (settings.includeAudio ?? DEFAULT_SETTINGS.includeAudio) ? 'translate-x-6' : 'translate-x-1',
+            ].join(' ')}
+          />
+        </button>
+      </div>
+
       {/* Merge Method */}
       <div class="flex flex-col gap-2">
         <label class="text-sm font-semibold text-gray-200">Merge Method</label>
