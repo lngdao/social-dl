@@ -20,6 +20,9 @@ export default defineConfig({
       '*://*.cdninstagram.com/*',
       '*://*.tiktokcdn.com/*',
       '*://api.cobalt.tools/*',
+      '*://*.canine.tools/*',
+      '*://*.meowing.de/*',
+      '*://*.imput.net/*',
     ],
     content_security_policy: {
       extension_pages: "script-src 'self' 'wasm-unsafe-eval'; object-src 'self';",
