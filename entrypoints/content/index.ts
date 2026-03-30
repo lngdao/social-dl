@@ -1,6 +1,7 @@
 import { defineContentScript } from 'wxt/utils/define-content-script';
 import { detectPlatform, getAdapter } from '../../src/content/platform-detector';
 import { showSingleDownloadButton, hideSingleDownloadButton } from '../../src/content/ui/single-button';
+import { facebookAdapter } from '../../src/adapters/facebook';
 import type { VideoInfo, VideoQuality } from '../../src/adapters/types';
 
 export default defineContentScript({
@@ -38,6 +39,21 @@ export default defineContentScript({
       if (interceptorInstalled) return;
       interceptorInstalled = true;
       console.log('[SD] Scan activated for', detected!.platform, detected!.pageType);
+
+      // Parse SSR script tags for initial batch (Facebook embeds first ~10 videos in SSR)
+      if (detected!.platform === 'facebook') {
+        try {
+          const ssrVideos = facebookAdapter.parseSSRScripts();
+          console.log('[SD] SSR: found', ssrVideos.length, 'initial videos');
+          for (const info of ssrVideos) {
+            handleVideoFound(info);
+          }
+        } catch (err) {
+          console.warn('[SD] SSR parse failed:', err);
+        }
+      }
+
+      // Install fetch/XHR interceptors for subsequent pagination requests
       adapter!.installFetchInterceptor(handleVideoFound);
     }
 

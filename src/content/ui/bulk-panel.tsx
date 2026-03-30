@@ -4,7 +4,7 @@ import type { VideoInfo } from '../../adapters/types';
 
 const QUALITY_OPTIONS = ['highest', '1080p', '720p', '360p'];
 const SCROLL_INTERVAL_MS = 1500;
-const NO_NEW_VIDEO_STOP_AFTER = 10; // stop after N scroll cycles with no new video
+const MAX_STALE_TIME_MS = 30_000; // stop after 30s with no new video
 
 interface BulkPanelProps {
   onDownloadSelected: (videos: VideoInfo[], quality: string) => void;
@@ -19,8 +19,7 @@ function BulkPanel({ onDownloadSelected, onClose }: BulkPanelProps) {
   const scrollRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   useEffect(() => {
-    let lastCount = 0;
-    let staleScrollCycles = 0;
+    let lastNewVideoTime = Date.now();
 
     function handleMessage(e: MessageEvent) {
       if (e.origin !== window.location.origin) return;
@@ -28,26 +27,20 @@ function BulkPanel({ onDownloadSelected, onClose }: BulkPanelProps) {
       const info = e.data.payload as VideoInfo;
       setVideos(prev => {
         if (prev.some(v => v.id === info.id)) return prev;
+        lastNewVideoTime = Date.now(); // reset timer on new video
         return [...prev, info];
       });
     }
     window.addEventListener('message', handleMessage);
 
     scrollRef.current = setInterval(() => {
-      // Check if we found new videos since last scroll
-      setVideos(prev => {
-        if (prev.length === lastCount) {
-          staleScrollCycles++;
-          if (staleScrollCycles >= NO_NEW_VIDEO_STOP_AFTER) {
-            setScanning(false);
-            if (scrollRef.current) clearInterval(scrollRef.current);
-          }
-        } else {
-          staleScrollCycles = 0;
-          lastCount = prev.length;
-        }
-        return prev;
-      });
+      // Adaptive timeout: stop after MAX_STALE_TIME_MS with no new video
+      const staleDuration = Date.now() - lastNewVideoTime;
+      if (staleDuration >= MAX_STALE_TIME_MS) {
+        setScanning(false);
+        if (scrollRef.current) clearInterval(scrollRef.current);
+        return;
+      }
       window.scrollBy(0, window.innerHeight * 0.8);
     }, SCROLL_INTERVAL_MS);
 
