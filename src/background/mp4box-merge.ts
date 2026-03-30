@@ -73,19 +73,14 @@ function parseFile(buffer: MP4BoxBuffer, label: string): Promise<ParsedTrack> {
 }
 
 /**
- * Merge a DASH video stream and audio stream into a single MP4 file and
- * trigger a download via the chrome.downloads API.
- *
- * This replaces the FFmpeg WASM approach — it is pure JS and runs directly
- * in the service worker without an offscreen document.
+ * Merge a DASH video+audio into a single MP4 and return the raw bytes.
+ * Does NOT trigger a download — caller decides what to do with the result.
  */
-export async function mergeWithMp4box(
+export async function mergeToBlob(
   videoUrl: string,
   audioUrl: string,
-  filename: string,
   onProgress: (percent: number) => void,
-): Promise<void> {
-  console.log(`${TAG} Starting merge: ${filename}`);
+): Promise<Uint8Array> {
   onProgress(0);
 
   // ── 1. Fetch both streams in parallel ──────────────────────────────
@@ -158,88 +153,63 @@ export async function mergeWithMp4box(
     description_boxes: audioDescBoxes,
   });
 
-  console.log(
-    `${TAG} Output tracks created – video: ${outVideoTrackId}, audio: ${outAudioTrackId}`,
-  );
   onProgress(50);
 
   // ── 5. Copy video samples ──────────────────────────────────────────
-  console.log(`${TAG} Copying ${videoParsed.samples.length} video samples...`);
   for (const sample of videoParsed.samples) {
     const data = sample.data
       ? new Uint8Array(sample.data.buffer, sample.data.byteOffset, sample.data.byteLength)
       : new Uint8Array(0);
-
     output.addSample(outVideoTrackId, data, {
-      duration: sample.duration,
-      dts: sample.dts,
-      cts: sample.cts,
-      is_sync: sample.is_sync,
+      duration: sample.duration, dts: sample.dts, cts: sample.cts, is_sync: sample.is_sync,
     });
   }
   onProgress(65);
 
   // ── 6. Copy audio samples (trimmed to video duration → -shortest) ──
-  // Convert video duration into audio timescale for comparison
-  const videoDurationSec =
-    videoTrackInfo.duration / videoTrackInfo.timescale;
+  const videoDurationSec = videoTrackInfo.duration / videoTrackInfo.timescale;
   const videoDurationInAudioTs = videoDurationSec * audioTrackInfo.timescale;
-
-  console.log(
-    `${TAG} Video duration: ${videoDurationSec.toFixed(2)}s ` +
-      `(${videoDurationInAudioTs.toFixed(0)} in audio timescale)`,
-  );
 
   let audioSamplesCopied = 0;
   for (const sample of audioParsed.samples) {
-    // Skip audio samples that start beyond the video duration
-    if (sample.dts >= videoDurationInAudioTs) {
-      break;
-    }
-
+    if (sample.dts >= videoDurationInAudioTs) break;
     const data = sample.data
       ? new Uint8Array(sample.data.buffer, sample.data.byteOffset, sample.data.byteLength)
       : new Uint8Array(0);
-
     output.addSample(outAudioTrackId, data, {
-      duration: sample.duration,
-      dts: sample.dts,
-      cts: sample.cts,
-      is_sync: sample.is_sync,
+      duration: sample.duration, dts: sample.dts, cts: sample.cts, is_sync: sample.is_sync,
     });
     audioSamplesCopied++;
   }
 
-  console.log(
-    `${TAG} Copied ${audioSamplesCopied}/${audioParsed.samples.length} audio samples ` +
-      `(trimmed to video duration)`,
-  );
+  console.log(`${TAG} Copied ${videoParsed.samples.length} video + ${audioSamplesCopied} audio samples`);
   onProgress(80);
 
   // ── 7. Serialize output to buffer ──────────────────────────────────
-  console.log(`${TAG} Serializing output...`);
   const outputStream = output.getBuffer();
   const outputBuffer = outputStream.buffer as ArrayBuffer;
-  const blob = new Blob([outputBuffer], { type: 'video/mp4' });
-
-  console.log(`${TAG} Output size: ${(blob.size / 1024 / 1024).toFixed(1)} MB`);
+  console.log(`${TAG} Output: ${(outputBuffer.byteLength / 1024 / 1024).toFixed(1)} MB`);
   onProgress(90);
 
-  // ── 8. Download via chrome.downloads ───────────────────────────────
-  const blobUrl = URL.createObjectURL(blob);
+  return new Uint8Array(outputBuffer);
+}
 
-  console.log(`${TAG} Starting download: ${filename}`);
-  await chrome.downloads.download({
-    url: blobUrl,
-    filename: `${filename}.mp4`,
-    saveAs: false,
-  });
+/**
+ * Merge and immediately download as a single MP4 file.
+ * Convenience wrapper around mergeToBlob.
+ */
+export async function mergeWithMp4box(
+  videoUrl: string,
+  audioUrl: string,
+  filename: string,
+  onProgress: (percent: number) => void,
+): Promise<void> {
+  console.log(`${TAG} Starting merge: ${filename}`);
+  const data = await mergeToBlob(videoUrl, audioUrl, onProgress);
+
+  const blobUrl = URL.createObjectURL(new Blob([data], { type: 'video/mp4' }));
+  await chrome.downloads.download({ url: blobUrl, filename: `${filename}.mp4`, saveAs: false });
   onProgress(100);
-  console.log(`${TAG} Download initiated successfully`);
 
-  // Revoke the blob URL after a delay to ensure the download has started
-  setTimeout(() => {
-    URL.revokeObjectURL(blobUrl);
-    console.log(`${TAG} Blob URL revoked`);
-  }, 30_000);
+  setTimeout(() => URL.revokeObjectURL(blobUrl), 30_000);
 }
