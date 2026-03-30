@@ -6,7 +6,7 @@
  * List of instances: https://instances.cobalt.best/
  */
 
-const DEFAULT_INSTANCE = 'https://api.cobalt.tools';
+const DEFAULT_INSTANCE = 'https://cobalt-backend.canine.tools';
 
 interface CobaltResponse {
   status: 'tunnel' | 'redirect' | 'picker' | 'local-processing' | 'error';
@@ -21,17 +21,23 @@ export async function downloadViaCobalt(
   filename: string,
   onProgress: (p: number) => void,
   instanceUrl?: string,
+  apiKey?: string,
 ): Promise<void> {
-  const instance = instanceUrl ?? DEFAULT_INSTANCE;
+  const instance = instanceUrl || DEFAULT_INSTANCE;
   onProgress(10);
   console.log('[SD-Cobalt] Requesting:', mediaUrl, 'from', instance);
 
+  const headers: Record<string, string> = {
+    'Content-Type': 'application/json',
+    'Accept': 'application/json',
+  };
+  if (apiKey) {
+    headers['Authorization'] = `Api-Key ${apiKey}`;
+  }
+
   const response = await fetch(`${instance}/`, {
     method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      'Accept': 'application/json',
-    },
+    headers,
     body: JSON.stringify({
       url: mediaUrl,
       videoQuality: '1080',
