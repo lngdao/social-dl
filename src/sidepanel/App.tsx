@@ -31,6 +31,8 @@ export function App() {
     chrome.runtime.sendMessage({ type: 'GET_SETTINGS' }, (res) => {
       if (res?.payload) setSettings(res.payload);
     });
+    // Activate scanning on the current tab
+    chrome.runtime.sendMessage({ type: 'REQUEST_SCAN' }).catch(() => {});
   }, []);
 
   // Subscribe to live updates
