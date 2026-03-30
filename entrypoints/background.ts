@@ -33,20 +33,25 @@ export default defineBackground(() => {
   /**
    * Prepare a video as raw bytes (Uint8Array) without triggering a download.
    * Used for ZIP batching when downloading multiple videos.
+   * Has fallback: try merge → fall back to video-only on failure.
    */
   async function prepareVideoBlob(
     videoInfo: VideoInfo,
     quality: VideoQuality,
     onProgress: (p: number) => void,
   ): Promise<Uint8Array> {
-    // If audio merge is needed and enabled
+    // If audio merge is needed and enabled, try mp4box merge
     if (quality.type === 'dash' && quality.audioUrl && settings.includeAudio && settings.mergeMethod === 'mp4box') {
-      console.log('[SD-BG] MP4Box merge to blob for:', videoInfo.id);
-      return mergeToBlob(quality.url, quality.audioUrl, onProgress);
+      try {
+        console.log('[SD-BG] MP4Box merge to blob for:', videoInfo.id);
+        return await mergeToBlob(quality.url, quality.audioUrl, onProgress);
+      } catch (err) {
+        console.warn('[SD-BG] MP4Box merge failed for', videoInfo.id, '— falling back to video-only:', err);
+      }
     }
 
-    // Direct fetch of the video URL
-    console.log('[SD-BG] Fetching video blob for:', videoInfo.id);
+    // Fallback: direct fetch of the video URL (video-only)
+    console.log('[SD-BG] Fetching video-only blob for:', videoInfo.id);
     onProgress(10);
     const resp = await fetch(quality.url);
     if (!resp.ok) throw new Error(`Fetch failed: ${resp.status}`);

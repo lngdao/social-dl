@@ -33,17 +33,27 @@ function parseFile(buffer: MP4BoxBuffer, label: string): Promise<ParsedTrack> {
     const file = createFile();
     let resolved = false;
 
+    // Timeout: if onReady never fires (e.g., fMP4 without moov), reject after 10s
+    const timeout = setTimeout(() => {
+      if (!resolved) {
+        resolved = true;
+        console.error(`${TAG} ${label} parse timeout — onReady never fired (${buffer.byteLength} bytes)`);
+        reject(new Error(`${TAG} ${label} parse timeout — file may be fragmented MP4 without moov box`));
+      }
+    }, 10_000);
+
     file.onError = (_module: string, message: string) => {
       if (!resolved) {
         resolved = true;
+        clearTimeout(timeout);
         reject(new Error(`${TAG} ${label} parse error: ${message}`));
       }
     };
 
     file.onReady = (info) => {
+      clearTimeout(timeout);
       console.log(`${TAG} ${label} ready – ${info.tracks.length} track(s)`);
 
-      // Pick first track (caller decides whether this is video or audio)
       const track = info.tracks[0];
       if (!track) {
         resolved = true;
@@ -67,6 +77,7 @@ function parseFile(buffer: MP4BoxBuffer, label: string): Promise<ParsedTrack> {
       resolve({ samples: collectedSamples, info, file });
     };
 
+    console.log(`${TAG} ${label} appending ${buffer.byteLength} bytes...`);
     file.appendBuffer(buffer);
     file.flush();
   });

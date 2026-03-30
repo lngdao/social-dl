@@ -215,59 +215,124 @@ export function parseSSRScripts(): VideoInfo[] {
 }
 
 /**
- * Recursively search an object for DASH prefetch data.
- * Facebook SSR nests data deeply in ScheduledServerJS format.
+ * Recursively search an object for DASH prefetch data in SSR.
+ * First pass: collect all metadata (video_id → thumbnail/title/url).
+ * Second pass: find DASH items and match with collected metadata.
  */
 function findDashInObject(
   obj: unknown,
   seenIds: Set<string>,
-  depth = 0,
 ): VideoInfo[] {
-  if (depth > 20 || !obj || typeof obj !== 'object') return [];
+  // First: collect metadata from the entire SSR tree
+  const metaMap = new Map<string, VideoMeta>();
+  collectSSRMetadata(obj, metaMap, 0);
+  log(`[Facebook] SSR metadata collected: ${metaMap.size} entries`);
+
+  // Second: find DASH prefetch items and match
+  const dashItems: DashPrefetch[] = [];
+  collectDashItems(obj, dashItems, 0);
+  log(`[Facebook] SSR DASH items found: ${dashItems.length}`);
 
   const results: VideoInfo[] = [];
-
-  if (Array.isArray(obj)) {
-    for (const item of obj) {
-      results.push(...findDashInObject(item, seenIds, depth + 1));
-    }
-    return results;
-  }
-
-  const o = obj as Record<string, unknown>;
-
-  // Check if this object has all_video_dash_prefetch_representations
-  const dashReps = (o.extensions as Record<string, unknown>)?.all_video_dash_prefetch_representations as DashPrefetch[] | undefined;
-  if (dashReps?.length) {
-    // This looks like a GraphQL response — parse it
-    const videos = parseAllVideos(o, window.location.href);
-    for (const v of videos) {
-      if (!seenIds.has(v.id)) {
-        seenIds.add(v.id);
-        results.push(v);
-      }
-    }
-    return results;
-  }
-
-  // Check if this object IS a DASH prefetch item directly
-  if (o.video_id && Array.isArray(o.representations)) {
-    const info = parseSingleDash(o as DashPrefetch, window.location.href);
-    if (info && !seenIds.has(info.id)) {
+  for (const item of dashItems) {
+    if (!item.video_id || seenIds.has(item.video_id)) continue;
+    const meta = metaMap.get(item.video_id);
+    const info = parseSingleDash(item, window.location.href, meta);
+    if (info) {
       seenIds.add(info.id);
       results.push(info);
-    }
-    return results;
-  }
-
-  // Recurse into values
-  for (const value of Object.values(o)) {
-    if (value && typeof value === 'object') {
-      results.push(...findDashInObject(value, seenIds, depth + 1));
     }
   }
 
   return results;
+}
+
+/** Collect video metadata from SSR data tree */
+function collectSSRMetadata(obj: unknown, map: Map<string, VideoMeta>, depth: number): void {
+  if (depth > 25 || !obj || typeof obj !== 'object') return;
+
+  if (Array.isArray(obj)) {
+    for (const item of obj) collectSSRMetadata(item, map, depth + 1);
+    return;
+  }
+
+  const o = obj as Record<string, unknown>;
+
+  // Check if this looks like a media node with id + thumbnail
+  if (typeof o.id === 'string' && o.id.match(/^\d+$/)) {
+    const thumb = extractThumbnail(o);
+    const url = o.shareable_url as string | undefined;
+    if (thumb || url) {
+      const existing = map.get(o.id);
+      map.set(o.id, {
+        thumbnail: thumb || existing?.thumbnail || '',
+        shareableUrl: url || existing?.shareableUrl,
+        title: existing?.title,
+      });
+    }
+  }
+
+  // Check for message.text (reel title)
+  if (o.message && typeof (o.message as Record<string, unknown>).text === 'string') {
+    // Look for an attachment with media.id nearby
+    const attachments = o.attachments as Array<Record<string, unknown>> | undefined;
+    if (attachments?.[0]) {
+      const media = attachments[0].media as Record<string, unknown> | undefined;
+      if (media?.id) {
+        const id = String(media.id);
+        const existing = map.get(id);
+        map.set(id, {
+          thumbnail: extractThumbnail(media) || existing?.thumbnail || '',
+          shareableUrl: (media.shareable_url as string) || existing?.shareableUrl,
+          title: (o.message as Record<string, unknown>).text as string,
+        });
+      }
+    }
+  }
+
+  // Recurse
+  for (const value of Object.values(o)) {
+    if (value && typeof value === 'object') {
+      collectSSRMetadata(value, map, depth + 1);
+    }
+  }
+}
+
+/** Collect all DASH prefetch items from SSR data tree */
+function collectDashItems(obj: unknown, items: DashPrefetch[], depth: number): void {
+  if (depth > 25 || !obj || typeof obj !== 'object') return;
+
+  if (Array.isArray(obj)) {
+    // Check if this array looks like all_video_dash_prefetch_representations
+    if (obj.length > 0 && obj[0] && typeof obj[0] === 'object' && 'video_id' in obj[0] && 'representations' in obj[0]) {
+      for (const item of obj) items.push(item as DashPrefetch);
+      return;
+    }
+    for (const item of obj) collectDashItems(item, items, depth + 1);
+    return;
+  }
+
+  const o = obj as Record<string, unknown>;
+
+  // Check extensions.all_video_dash_prefetch_representations
+  const ext = o.extensions as Record<string, unknown> | undefined;
+  const dashReps = ext?.all_video_dash_prefetch_representations;
+  if (Array.isArray(dashReps) && dashReps.length > 0) {
+    for (const item of dashReps) items.push(item as DashPrefetch);
+    return;
+  }
+
+  // Standalone DASH item
+  if (typeof o.video_id === 'string' && Array.isArray(o.representations)) {
+    items.push(o as unknown as DashPrefetch);
+    return;
+  }
+
+  for (const value of Object.values(o)) {
+    if (value && typeof value === 'object') {
+      collectDashItems(value, items, depth + 1);
+    }
+  }
 }
 
 function parseVideoNode(node: Record<string, unknown>, sourceUrl: string): VideoInfo | null {
