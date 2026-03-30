@@ -24,4 +24,7 @@ export type SidePanelToBackground =
   | { type: 'CANCEL_JOB'; payload: { jobId: string } }
   | { type: 'CLEAR_HISTORY' };
 
-export type AnyMessage = ContentToBackground | SidePanelToBackground;
+export type BackgroundToContent =
+  | { type: 'ACTIVATE_SCAN' };
+
+export type AnyMessage = ContentToBackground | SidePanelToBackground | BackgroundToContent;

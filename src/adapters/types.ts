@@ -38,9 +38,14 @@ export interface HistoryEntry {
   fileSizeBytes?: number;
 }
 
+export type MergeMethod = 'mp4box' | 'ffmpeg' | 'direct';
+
 export interface Settings {
   concurrency: number;
   defaultQuality: string;
+  mergeMethod: MergeMethod;
+  cobaltInstance: string;
+  cobaltApiKey: string;
 }
 
 export interface PlatformAdapter {

@@ -6,6 +6,9 @@ const SETTINGS_KEY = 'settings';
 export const DEFAULT_SETTINGS: Settings = {
   concurrency: 3,
   defaultQuality: 'highest',
+  mergeMethod: 'mp4box',
+  cobaltInstance: 'https://cobalt-backend.canine.tools',
+  cobaltApiKey: '',
 };
 
 export async function storageGet<T>(key: string, fallback: T): Promise<T> {
