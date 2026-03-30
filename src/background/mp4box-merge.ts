@@ -231,8 +231,8 @@ export async function mergeWithMp4box(
   console.log(`${TAG} Starting download: ${filename}`);
   await chrome.downloads.download({
     url: blobUrl,
-    filename,
-    conflictAction: 'uniquify',
+    filename: `${filename}.mp4`,
+    saveAs: false,
   });
   onProgress(100);
   console.log(`${TAG} Download initiated successfully`);
