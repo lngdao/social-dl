@@ -10,6 +10,7 @@ export default defineContentScript({
 
   main() {
     let currentVideo: VideoInfo | null = null;
+    let interceptorInstalled = false;
 
     function handleVideoFound(info: VideoInfo) {
       currentVideo = info;
@@ -33,7 +34,19 @@ export default defineContentScript({
     const adapter = getAdapter(detected.platform);
     if (!adapter) return;
 
-    adapter.installFetchInterceptor(handleVideoFound);
+    function activateScan() {
+      if (interceptorInstalled) return;
+      interceptorInstalled = true;
+      console.log('[SD] Scan activated for', detected!.platform, detected!.pageType);
+      adapter!.installFetchInterceptor(handleVideoFound);
+    }
+
+    // Listen for activation from ISOLATED world content script
+    window.addEventListener('message', (e) => {
+      if (e.data?.type === '__SD_ACTIVATE_SCAN__') {
+        activateScan();
+      }
+    });
 
     // Detect SPA navigation
     let lastUrl = window.location.href;
@@ -46,7 +59,6 @@ export default defineContentScript({
       }
     }
 
-    // Monkey-patch pushState/replaceState for SPA navigation
     const origPushState = history.pushState.bind(history);
     const origReplaceState = history.replaceState.bind(history);
     history.pushState = function (...args) {
