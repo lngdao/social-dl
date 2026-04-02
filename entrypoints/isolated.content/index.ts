@@ -9,37 +9,43 @@ export default defineContentScript({
   runAt: 'document_idle',
 
   main() {
-    let activated = false;
+    let scanActivated = false;
 
-    function activate() {
-      if (activated) return;
-      activated = true;
+    function onDownloadSelected(videos: VideoInfo[], quality: string) {
+      console.log('[SD] Sending BULK_DOWNLOAD_REQUEST:', videos.length, 'videos, quality:', quality);
+      chrome.runtime.sendMessage({
+        type: 'BULK_DOWNLOAD_REQUEST',
+        payload: { videos, quality },
+      }, (response) => {
+        console.log('[SD] Background response:', response, chrome.runtime.lastError);
+      });
+    }
 
-      const detected = detectPlatform(window.location.href);
-      if (!detected) return;
-
-      console.log('[SD] Scan activated by user for', detected.platform, detected.pageType);
-
-      // Forward activation to MAIN world (which installs fetch interceptors)
-      window.postMessage({ type: '__SD_ACTIVATE_SCAN__' }, '*');
-
-      if (detected.pageType === 'profile') {
-        showBulkPanel((videos: VideoInfo[], quality: string) => {
-          console.log('[SD] Sending BULK_DOWNLOAD_REQUEST:', videos.length, 'videos, quality:', quality);
-          chrome.runtime.sendMessage({
-            type: 'BULK_DOWNLOAD_REQUEST',
-            payload: { videos, quality },
-          }, (response) => {
-            console.log('[SD] Background response:', response, chrome.runtime.lastError);
-          });
-        });
+    function activateScan() {
+      // Always forward to MAIN world (idempotent there)
+      if (!scanActivated) {
+        scanActivated = true;
+        window.postMessage({ type: '__SD_ACTIVATE_SCAN__' }, '*');
       }
     }
 
-    // Listen for ACTIVATE_SCAN from background (triggered when side panel opens)
+    function togglePanel() {
+      const detected = detectPlatform(window.location.href);
+      if (!detected) return;
+
+      // Activate scan interceptors if not already done
+      activateScan();
+
+      // Toggle the bulk panel (showBulkPanel toggles if already open)
+      if (detected.pageType === 'profile') {
+        showBulkPanel(onDownloadSelected);
+      }
+    }
+
+    // Listen for ACTIVATE_SCAN from background (triggered when side panel opens or user clicks)
     chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
       if (message.type === 'ACTIVATE_SCAN') {
-        activate();
+        togglePanel();
         sendResponse({ ok: true });
       }
       return false;

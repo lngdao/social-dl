@@ -1,10 +1,10 @@
 import { render } from 'preact';
-import { useState, useEffect, useRef } from 'preact/hooks';
+import { useState, useEffect, useRef, useCallback } from 'preact/hooks';
 import type { VideoInfo } from '../../adapters/types';
 
 const QUALITY_OPTIONS = ['highest', '1080p', '720p', '360p'];
 const SCROLL_INTERVAL_MS = 1500;
-const MAX_STALE_TIME_MS = 30_000; // stop after 30s with no new video
+const MAX_STALE_TIME_MS = 30_000;
 
 interface BulkPanelProps {
   onDownloadSelected: (videos: VideoInfo[], quality: string) => void;
@@ -15,37 +15,53 @@ function BulkPanel({ onDownloadSelected, onClose }: BulkPanelProps) {
   const [videos, setVideos] = useState<VideoInfo[]>([]);
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [quality, setQuality] = useState('highest');
-  const [scanning, setScanning] = useState(true);
+  const [scanning, setScanning] = useState(false); // start paused
+  const [copyLabel, setCopyLabel] = useState('');
   const scrollRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const lastNewVideoTimeRef = useRef(Date.now());
 
+  // Listen for video found messages (always, regardless of scan state)
   useEffect(() => {
-    let lastNewVideoTime = Date.now();
-
     function handleMessage(e: MessageEvent) {
       if (e.origin !== window.location.origin) return;
       if (e.data?.type !== '__SD_VIDEO_FOUND__') return;
       const info = e.data.payload as VideoInfo;
       setVideos(prev => {
         if (prev.some(v => v.id === info.id)) return prev;
-        lastNewVideoTime = Date.now(); // reset timer on new video
+        lastNewVideoTimeRef.current = Date.now();
         return [...prev, info];
       });
     }
     window.addEventListener('message', handleMessage);
+    return () => window.removeEventListener('message', handleMessage);
+  }, []);
+
+  const stopScan = useCallback(() => {
+    setScanning(false);
+    if (scrollRef.current) {
+      clearInterval(scrollRef.current);
+      scrollRef.current = null;
+    }
+  }, []);
+
+  const startScan = useCallback(() => {
+    if (scrollRef.current) return; // already running
+    setScanning(true);
+    lastNewVideoTimeRef.current = Date.now();
 
     scrollRef.current = setInterval(() => {
-      // Adaptive timeout: stop after MAX_STALE_TIME_MS with no new video
-      const staleDuration = Date.now() - lastNewVideoTime;
+      const staleDuration = Date.now() - lastNewVideoTimeRef.current;
       if (staleDuration >= MAX_STALE_TIME_MS) {
-        setScanning(false);
-        if (scrollRef.current) clearInterval(scrollRef.current);
+        stopScan();
         return;
       }
       window.scrollBy(0, window.innerHeight * 0.8);
     }, SCROLL_INTERVAL_MS);
+  }, [stopScan]);
 
+  // Cleanup on unmount
+  useEffect(() => {
     return () => {
-      window.removeEventListener('message', handleMessage);
       if (scrollRef.current) clearInterval(scrollRef.current);
     };
   }, []);
@@ -71,6 +87,33 @@ function BulkPanel({ onDownloadSelected, onClose }: BulkPanelProps) {
     const toDownload = videos.filter(v => selected.has(v.id));
     if (toDownload.length === 0) return;
     onDownloadSelected(toDownload, quality);
+  }
+
+  function getSelectedURLs(): string[] {
+    return videos
+      .filter(v => selected.has(v.id))
+      .map(v => v.sourceUrl)
+      .filter(Boolean);
+  }
+
+  function handleCopyURLs() {
+    const urls = getSelectedURLs();
+    if (urls.length === 0) return;
+    navigator.clipboard.writeText(urls.join('\n')).then(() => {
+      setCopyLabel(`Copied ${urls.length}!`);
+      setTimeout(() => setCopyLabel(''), 2000);
+    });
+  }
+
+  function handleSaveFile() {
+    const urls = getSelectedURLs();
+    if (urls.length === 0) return;
+    const blob = new Blob([urls.join('\n')], { type: 'text/plain' });
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = `social-dl-urls-${Date.now()}.txt`;
+    a.click();
+    URL.revokeObjectURL(a.href);
   }
 
   const allSelected = videos.length > 0 && selected.size === videos.length;
@@ -106,16 +149,37 @@ function BulkPanel({ onDownloadSelected, onClose }: BulkPanelProps) {
         </button>
       </div>
 
-      {/* Status */}
-      <div style={{ padding: '8px 16px', fontSize: '13px', color: scanning ? '#60a5fa' : '#34d399' }}>
-        {scanning ? `Scanning… ${videos.length} video${videos.length !== 1 ? 's' : ''} found` : `Scan complete — ${videos.length} video${videos.length !== 1 ? 's' : ''} found`}
+      {/* Scan control */}
+      <div style={{ padding: '8px 16px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', borderBottom: '1px solid #374151' }}>
+        <div style={{ fontSize: '13px', color: scanning ? '#60a5fa' : videos.length > 0 ? '#34d399' : '#9ca3af' }}>
+          {scanning
+            ? `Scanning… ${videos.length} video${videos.length !== 1 ? 's' : ''}`
+            : videos.length > 0
+              ? `${videos.length} video${videos.length !== 1 ? 's' : ''} found`
+              : 'Ready to scan'}
+        </div>
+        <button
+          onClick={scanning ? stopScan : startScan}
+          style={{
+            background: scanning ? '#dc2626' : '#2563eb',
+            border: 'none',
+            borderRadius: '6px',
+            color: '#fff',
+            fontSize: '12px',
+            fontWeight: 600,
+            padding: '4px 12px',
+            cursor: 'pointer',
+          }}
+        >
+          {scanning ? 'Pause' : videos.length > 0 ? 'Resume' : 'Start Scan'}
+        </button>
       </div>
 
       {/* Video list */}
-      <div style={{ flex: 1, overflowY: 'auto', padding: '0 16px 8px' }}>
+      <div style={{ flex: 1, overflowY: 'auto', padding: '0 16px 8px', marginTop: '8px' }}>
         {videos.length === 0 && (
           <div style={{ color: '#6b7280', fontSize: '13px', textAlign: 'center', padding: '24px 0' }}>
-            {scanning ? 'Waiting for videos…' : 'No videos detected'}
+            {scanning ? 'Scrolling page to find videos…' : 'Press "Start Scan" to begin'}
           </div>
         )}
         {videos.map(v => (
@@ -161,7 +225,8 @@ function BulkPanel({ onDownloadSelected, onClose }: BulkPanelProps) {
             disabled={videos.length === 0}
             style={{
               background: 'none', border: '1px solid #4b5563', borderRadius: '6px',
-              color: '#d1d5db', fontSize: '12px', padding: '4px 10px', cursor: 'pointer',
+              color: videos.length > 0 ? '#d1d5db' : '#6b7280', fontSize: '12px', padding: '4px 10px',
+              cursor: videos.length > 0 ? 'pointer' : 'not-allowed',
             }}
           >
             {allSelected ? 'Deselect All' : 'Select All'}
@@ -176,6 +241,31 @@ function BulkPanel({ onDownloadSelected, onClose }: BulkPanelProps) {
           >
             {QUALITY_OPTIONS.map(q => <option key={q} value={q}>{q}</option>)}
           </select>
+        </div>
+        {/* Export buttons */}
+        <div style={{ display: 'flex', gap: '6px' }}>
+          <button
+            onClick={handleCopyURLs}
+            disabled={selected.size === 0}
+            style={{
+              flex: 1, background: '#374151', border: '1px solid #4b5563', borderRadius: '6px',
+              color: selected.size > 0 ? '#d1d5db' : '#6b7280', fontSize: '12px', padding: '6px 8px',
+              cursor: selected.size > 0 ? 'pointer' : 'not-allowed',
+            }}
+          >
+            {copyLabel || `Copy URLs (${selected.size})`}
+          </button>
+          <button
+            onClick={handleSaveFile}
+            disabled={selected.size === 0}
+            style={{
+              flex: 1, background: '#374151', border: '1px solid #4b5563', borderRadius: '6px',
+              color: selected.size > 0 ? '#d1d5db' : '#6b7280', fontSize: '12px', padding: '6px 8px',
+              cursor: selected.size > 0 ? 'pointer' : 'not-allowed',
+            }}
+          >
+            Save .txt
+          </button>
         </div>
         <button
           onClick={handleDownload}
@@ -197,7 +287,13 @@ function BulkPanel({ onDownloadSelected, onClose }: BulkPanelProps) {
 
 export function showBulkPanel(onDownloadSelected: (videos: VideoInfo[], quality: string) => void): void {
   const mountId = '__sd_bulk_panel_mount__';
-  if (document.getElementById(mountId)) return;
+
+  // If already mounted, just show it again (toggle)
+  const existing = document.getElementById(mountId);
+  if (existing) {
+    existing.remove();
+    return;
+  }
 
   const mount = document.createElement('div');
   mount.id = mountId;

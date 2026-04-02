@@ -62,7 +62,15 @@ export function App() {
     <div class="flex flex-col h-screen bg-gray-900 text-gray-100">
       {/* Header */}
       <div class="px-4 pt-4 pb-0">
-        <h1 class="text-base font-bold text-white mb-3">Social Downloader</h1>
+        <div class="flex items-center justify-between mb-3">
+          <h1 class="text-base font-bold text-white">Social Downloader</h1>
+          <button
+            onClick={() => chrome.runtime.sendMessage({ type: 'REQUEST_SCAN' })}
+            class="text-xs bg-blue-600 hover:bg-blue-500 text-white font-medium px-3 py-1.5 rounded-md transition-colors"
+          >
+            Scan Page
+          </button>
+        </div>
         {/* Tab bar */}
         <div class="flex border-b border-gray-700">
           {TABS.map(t => (

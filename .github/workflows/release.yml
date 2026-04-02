@@ -1,0 +1,107 @@
+name: Release
+
+on:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: write
+
+jobs:
+  # ── Build Chrome Extension ──
+  extension:
+    name: Build Extension
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - run: npm ci
+      - run: npm run build
+
+      - name: Zip extension
+        run: |
+          cd .output/chrome-mv3
+          zip -r ../../social-downloader-extension-${{ github.ref_name }}.zip .
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: extension
+          path: social-downloader-extension-${{ github.ref_name }}.zip
+
+  # ── Build CLI for all platforms ──
+  cli:
+    name: Build CLI (${{ matrix.goos }}-${{ matrix.goarch }})
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        include:
+          - goos: darwin
+            goarch: arm64
+            suffix: macos-apple-silicon
+          - goos: darwin
+            goarch: amd64
+            suffix: macos-intel
+          - goos: linux
+            goarch: amd64
+            suffix: linux-amd64
+          - goos: linux
+            goarch: arm64
+            suffix: linux-arm64
+          - goos: windows
+            goarch: amd64
+            suffix: windows-amd64
+            ext: .exe
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.23'
+          cache-dependency-path: social-dl/go.sum
+
+      - name: Build
+        working-directory: social-dl
+        env:
+          CGO_ENABLED: '0'
+          GOOS: ${{ matrix.goos }}
+          GOARCH: ${{ matrix.goarch }}
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+          go build -ldflags "-s -w -X main.version=${VERSION}" \
+            -o ../social-dl-${{ matrix.suffix }}${{ matrix.ext }} \
+            ./cmd/social-dl
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: cli-${{ matrix.suffix }}
+          path: social-dl-${{ matrix.suffix }}${{ matrix.ext }}
+
+  # ── Create GitHub Release ──
+  release:
+    name: Create Release
+    needs: [extension, cli]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+          merge-multiple: true
+
+      - name: List artifacts
+        run: ls -lh artifacts/
+
+      - name: Create release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release create "${{ github.ref_name }}" \
+            --title "Release ${{ github.ref_name }}" \
+            --generate-notes \
+            artifacts/*
