@@ -30,15 +30,16 @@ type batchDoneMsg struct {
 }
 
 type progressModel struct {
-	spinner     spinner.Model
-	progressBar progress.Model
-	title       string
-	percent     float64
-	speed       string
-	eta         string
-	status      string // "downloading", "merging", "finished", "error"
-	filePath    string
-	err         error
+	spinner      spinner.Model
+	progressBar  progress.Model // per-video progress
+	overallBar   progress.Model // batch overall progress
+	title        string
+	percent      float64
+	speed        string
+	eta          string
+	status       string // "downloading", "merging", "finished", "error"
+	filePath     string
+	err          error
 
 	// Batch state
 	isBatch      bool

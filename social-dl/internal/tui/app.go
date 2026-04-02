@@ -405,6 +405,9 @@ func (a App) makeDownloadOpts(url string) ytdlp.DownloadOpts {
 	if a.appSettings.UseArchive {
 		opts.ArchiveFile = archivePath()
 	}
+	if a.appSettings.VerboseLog {
+		opts.LogFile = logFilePath()
+	}
 	return opts
 }
 
@@ -475,6 +478,9 @@ func (a App) startBatchDownload(urls []string, subfolder string) tea.Cmd {
 			}
 			if settings.UseArchive {
 				opts.ArchiveFile = archivePath()
+			}
+			if settings.VerboseLog {
+				opts.LogFile = logFilePath()
 			}
 
 			ctx := context.Background()

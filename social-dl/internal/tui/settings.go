@@ -15,6 +15,7 @@ type AppSettings struct {
 	OutputDir    string `json:"output_dir"`     // thư mục lưu video
 	UseArchive   bool   `json:"use_archive"`    // skip video đã tải
 	CookieFile   string `json:"cookie_file"`    // path tới cookies.txt (optional)
+	VerboseLog   bool   `json:"verbose_log"`    // ghi log yt-dlp ra file
 }
 
 func defaultSettings() AppSettings {
@@ -58,6 +59,11 @@ func saveSettings(s AppSettings) {
 func archivePath() string {
 	dir, _ := deps.BinDir()
 	return filepath.Join(filepath.Dir(dir), "archive.txt")
+}
+
+func logFilePath() string {
+	dir, _ := deps.BinDir()
+	return filepath.Join(filepath.Dir(dir), "social-dl.log")
 }
 
 var qualityOptions = []string{"best", "1080p", "720p", "480p", "360p"}

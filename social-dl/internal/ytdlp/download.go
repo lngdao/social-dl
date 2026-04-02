@@ -5,9 +5,12 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"os"
 	"os/exec"
+	"path/filepath"
 	"strconv"
 	"strings"
+	"time"
 )
 
 // DownloadOpts cấu hình cho 1 lần download.
@@ -20,6 +23,7 @@ type DownloadOpts struct {
 	CookieFile   string // optional
 	IncludeAudio bool
 	ArchiveFile  string // optional, path to download archive
+	LogFile      string // optional, path to write yt-dlp output log
 }
 
 // Download chạy yt-dlp download, stream progress qua callback.
@@ -29,7 +33,7 @@ func Download(ctx context.Context, opts DownloadOpts, onProgress func(Progress))
 		"-f", opts.FormatSpec,
 		"--merge-output-format", "mp4",
 		"--ffmpeg-location", opts.FfmpegDir,
-		"-o", fmt.Sprintf("%s/%%(title).80s [%%(id)s].%%(ext)s", opts.OutputDir),
+		"-o", filepath.Join(opts.OutputDir, "%(title).80s [%(id)s].%(ext)s"),
 		"--newline",
 		"--progress-template", `download:{"status":"%(progress.status)s","percent":"%(progress._percent_str)s","speed":"%(progress._speed_str)s","eta":"%(progress._eta_str)s"}`,
 		"--no-warnings",
@@ -48,7 +52,28 @@ func Download(ctx context.Context, opts DownloadOpts, onProgress func(Progress))
 		args = append(args, "--download-archive", opts.ArchiveFile)
 	}
 
+	// Verbose mode: add -v flag and remove --no-warnings
+	if opts.LogFile != "" {
+		for i, a := range args {
+			if a == "--no-warnings" {
+				args[i] = "-v"
+				break
+			}
+		}
+	}
+
 	args = append(args, opts.URL)
+
+	// Open log file if specified
+	var logWriter *os.File
+	if opts.LogFile != "" {
+		logWriter, _ = os.OpenFile(opts.LogFile, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0644)
+		if logWriter != nil {
+			defer logWriter.Close()
+			fmt.Fprintf(logWriter, "\n=== %s ===\n", time.Now().Format("2006-01-02 15:04:05"))
+			fmt.Fprintf(logWriter, "CMD: %s %s\n", opts.YtDlpPath, strings.Join(args, " "))
+		}
+	}
 
 	cmd := exec.CommandContext(ctx, opts.YtDlpPath, args...)
 
@@ -66,6 +91,10 @@ func Download(ctx context.Context, opts DownloadOpts, onProgress func(Progress))
 	var lastFile string
 	for scanner.Scan() {
 		line := scanner.Text()
+
+		if logWriter != nil {
+			fmt.Fprintln(logWriter, line)
+		}
 
 		if strings.HasPrefix(line, "download:") {
 			jsonStr := strings.TrimPrefix(line, "download:")
@@ -107,7 +136,14 @@ func Download(ctx context.Context, opts DownloadOpts, onProgress func(Progress))
 	}
 
 	if err := cmd.Wait(); err != nil {
+		if logWriter != nil {
+			fmt.Fprintf(logWriter, "EXIT ERROR: %v\n", err)
+		}
 		return "", fmt.Errorf("yt-dlp exited: %w", err)
+	}
+
+	if logWriter != nil {
+		fmt.Fprintf(logWriter, "OK: %s\n", lastFile)
 	}
 
 	if onProgress != nil {
@@ -123,7 +159,7 @@ func DownloadPlaylist(ctx context.Context, opts DownloadOpts, onProgress func(Pr
 		"-f", opts.FormatSpec,
 		"--merge-output-format", "mp4",
 		"--ffmpeg-location", opts.FfmpegDir,
-		"-o", fmt.Sprintf("%s/%%(title).80s [%%(id)s].%%(ext)s", opts.OutputDir),
+		"-o", filepath.Join(opts.OutputDir, "%(title).80s [%(id)s].%(ext)s"),
 		"--newline",
 		"--progress-template", `download:{"status":"%(progress.status)s","percent":"%(progress._percent_str)s","speed":"%(progress._speed_str)s","eta":"%(progress._eta_str)s"}`,
 		"--no-warnings",

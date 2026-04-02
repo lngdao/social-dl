@@ -17,6 +17,7 @@ const (
 	fieldQuality
 	fieldOutputDir
 	fieldArchive
+	fieldVerbose
 	fieldCount
 )
 
@@ -70,6 +71,8 @@ func (m settingsViewModel) Update(msg tea.Msg) (settingsViewModel, tea.Cmd) {
 				return m, textinput.Blink
 			case fieldArchive:
 				m.settings.UseArchive = !m.settings.UseArchive
+			case fieldVerbose:
+				m.settings.VerboseLog = !m.settings.VerboseLog
 			}
 			saveSettings(m.settings)
 			return m, func() tea.Msg { return settingsSavedMsg{} }
@@ -123,6 +126,7 @@ func (m settingsViewModel) View() string {
 		{fieldQuality, "Chat luong", qualityView(m.settings.Quality)},
 		{fieldOutputDir, "Thu muc luu", m.settings.OutputDir},
 		{fieldArchive, "Bo qua da tai", toggleView(m.settings.UseArchive)},
+		{fieldVerbose, "Ghi log debug", verboseView(m.settings.VerboseLog)},
 	}
 
 	content := ""
@@ -161,6 +165,13 @@ func (m settingsViewModel) View() string {
 	}
 
 	return header + boxStyle.Render(content) + help
+}
+
+func verboseView(on bool) string {
+	if on {
+		return "[ON]   " + mutedStyle.Render(logFilePath())
+	}
+	return "[OFF] "
 }
 
 func toggleView(on bool) string {
