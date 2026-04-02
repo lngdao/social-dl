@@ -314,19 +314,22 @@ func (a App) updateProfile(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return &a, a.scanProfile(url)
 
 	case submitProfileMsg:
-		urls := make([]string, len(msg.entries))
-		for i, e := range msg.entries {
+		urls := make([]string, 0, len(msg.entries))
+		for _, e := range msg.entries {
 			if e.URL != "" {
-				urls[i] = e.URL
-			} else {
-				urls[i] = msg.url // fallback to profile URL for yt-dlp playlist
+				urls = append(urls, e.URL)
 			}
 		}
-		// Use playlist download for profile
+		if len(urls) == 0 {
+			// Fallback: use profile URL directly for yt-dlp playlist
+			urls = []string{msg.url}
+		}
+		// Use batch engine with auto-generated subfolder
+		subfolder := "profile-" + time.Now().Format("2006-01-02")
 		a.state = viewProgress
 		a.progress = newProgressModel(
-			fmt.Sprintf("Tai %d video tu profile", len(msg.entries)), true)
-		return &a, tea.Batch(a.progress.Init(), a.startProfileDownload(msg.url, len(msg.entries)))
+			fmt.Sprintf("Tai %d video tu profile", len(urls)), true)
+		return &a, tea.Batch(a.progress.Init(), a.startBatchDownload(urls, subfolder))
 	}
 
 	var cmd tea.Cmd
@@ -664,19 +667,3 @@ func (a App) scanProfile(url string) tea.Cmd {
 	}
 }
 
-func (a App) startProfileDownload(profileURL string, total int) tea.Cmd {
-	program := a.program
-	opts := a.makeDownloadOpts(profileURL)
-	return func() tea.Msg {
-		ctx := context.Background()
-		err := ytdlp.DownloadPlaylist(ctx, opts, func(p ytdlp.Progress) {
-			if program != nil {
-				program.Send(downloadProgressMsg{progress: p})
-			}
-		})
-		if err != nil {
-			return downloadErrorMsg{err: err}
-		}
-		return batchDoneMsg{succeeded: total, failed: 0}
-	}
-}
