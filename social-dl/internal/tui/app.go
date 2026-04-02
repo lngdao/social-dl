@@ -324,8 +324,7 @@ func (a App) updateProfile(msg tea.Msg) (tea.Model, tea.Cmd) {
 			// Fallback: use profile URL directly for yt-dlp playlist
 			urls = []string{msg.url}
 		}
-		// Use batch engine with auto-generated subfolder
-		subfolder := "profile-" + time.Now().Format("2006-01-02")
+		subfolder := msg.subfolder
 		a.state = viewProgress
 		a.progress = newProgressModel(
 			fmt.Sprintf("Tai %d video tu profile", len(urls)), true)

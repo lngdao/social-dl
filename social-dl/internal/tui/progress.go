@@ -2,7 +2,7 @@ package tui
 
 import (
 	"fmt"
-	"strings"
+	"sort"
 	"sync"
 
 	"github.com/charmbracelet/bubbles/progress"
@@ -231,38 +231,37 @@ func (m progressModel) batchView() string {
 
 		overall := stats + "\n" + m.progressBar.ViewAs(overallPct) + "\n"
 
-		// Active downloads list with per-video progress
+		// Active downloads list — sorted by index for stable display
+		keys := make([]int, 0, len(m.active))
+		for k := range m.active {
+			keys = append(keys, k)
+		}
+		sort.Ints(keys)
+
 		activeList := ""
 		count := 0
-		for _, dl := range m.active {
+		for _, k := range keys {
+			dl := m.active[k]
 			if count >= 5 {
 				remaining := activeCount - 5
 				activeList += mutedStyle.Render(fmt.Sprintf("  ... +%d khac\n", remaining))
 				break
 			}
 			title := lipgloss.NewStyle().Foreground(colorText).Render(truncate(dl.title, 40))
+
+			// Size
+			size := ""
+			if dl.downloaded != "" && dl.downloaded != "N/A" {
+				size = lipgloss.NewStyle().Foreground(colorPrimary).Bold(true).Render(dl.downloaded)
+			}
+
+			// Speed
 			spd := ""
 			if dl.speed != "" && dl.speed != "N/A" {
 				spd = lipgloss.NewStyle().Foreground(colorSecondary).Render(dl.speed)
 			}
 
-			if dl.percent > 0 {
-				// Known progress: show bar
-				pct := lipgloss.NewStyle().Foreground(colorPrimary).Bold(true).
-					Render(fmt.Sprintf("%3.0f%%", dl.percent*100))
-				barWidth := 15
-				filled := int(dl.percent * float64(barWidth))
-				bar := lipgloss.NewStyle().Foreground(colorPrimary).Render(strings.Repeat("█", filled)) +
-					lipgloss.NewStyle().Foreground(colorDim).Render(strings.Repeat("░", barWidth-filled))
-				activeList += fmt.Sprintf("  %s %s %s  %s\n", pct, bar, title, spd)
-			} else {
-				// Unknown progress (Facebook etc): show spinner + downloaded size + speed
-				dlSize := ""
-				if dl.downloaded != "" && dl.downloaded != "N/A" {
-					dlSize = lipgloss.NewStyle().Foreground(colorPrimary).Bold(true).Render(dl.downloaded)
-				}
-				activeList += fmt.Sprintf("  %s %s %s  %s\n", m.spinner.View(), dlSize, title, spd)
-			}
+			activeList += fmt.Sprintf("  %s  %s  %s  %s\n", m.spinner.View(), size, spd, title)
 			count++
 		}
 

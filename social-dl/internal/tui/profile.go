@@ -3,6 +3,7 @@ package tui
 import (
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/charmbracelet/bubbles/spinner"
 	"github.com/charmbracelet/bubbles/textinput"
@@ -17,17 +18,27 @@ type profileScanMsg struct {
 }
 
 type submitProfileMsg struct {
-	url     string
-	entries []ytdlp.PlaylistEntry
+	url       string
+	entries   []ytdlp.PlaylistEntry
+	subfolder string
 }
 
+type profileStep int
+
+const (
+	profileStepURL profileStep = iota
+	profileStepFolder
+)
+
 type profileModel struct {
-	input    textinput.Model
-	spinner  spinner.Model
-	scanning bool
-	entries  []ytdlp.PlaylistEntry
-	err      string
-	platform string // detected platform
+	step        profileStep
+	input       textinput.Model
+	folderInput textinput.Model
+	spinner     spinner.Model
+	scanning    bool
+	entries     []ytdlp.PlaylistEntry
+	err         string
+	platform    string
 }
 
 func newProfileModel() profileModel {
@@ -39,11 +50,18 @@ func newProfileModel() profileModel {
 	ti.PromptStyle = lipgloss.NewStyle().Foreground(colorPrimary)
 	ti.TextStyle = lipgloss.NewStyle().Foreground(colorText)
 
+	fo := textinput.New()
+	fo.Placeholder = "vd: tiktok-username  (de trong = khong tao)"
+	fo.CharLimit = 100
+	fo.Width = 65
+	fo.PromptStyle = lipgloss.NewStyle().Foreground(colorPrimary)
+	fo.TextStyle = lipgloss.NewStyle().Foreground(colorText)
+
 	s := spinner.New()
 	s.Spinner = spinner.Dot
 	s.Style = lipgloss.NewStyle().Foreground(colorPrimary)
 
-	return profileModel{input: ti, spinner: s}
+	return profileModel{input: ti, folderInput: fo, spinner: s}
 }
 
 func (m profileModel) Init() tea.Cmd {
@@ -56,13 +74,20 @@ func (m profileModel) Update(msg tea.Msg) (profileModel, tea.Cmd) {
 		if m.scanning {
 			return m, nil
 		}
+		if m.step == profileStepFolder {
+			return m.updateFolderStep(msg)
+		}
 		switch msg.String() {
 		case "enter":
 			if len(m.entries) > 0 {
-				url := strings.TrimSpace(m.input.Value())
-				return m, func() tea.Msg {
-					return submitProfileMsg{url: url, entries: m.entries}
-				}
+				// Entries found → go to folder step
+				m.step = profileStepFolder
+				m.input.Blur()
+				suggestion := "profile-" + time.Now().Format("2006-01-02")
+				m.folderInput.SetValue(suggestion)
+				m.folderInput.SetCursor(len(suggestion))
+				m.folderInput.Focus()
+				return m, textinput.Blink
 			}
 			url := strings.TrimSpace(m.input.Value())
 			if url == "" || !isValidURL(url) {
@@ -74,7 +99,7 @@ func (m profileModel) Update(msg tea.Msg) (profileModel, tea.Cmd) {
 			m.scanning = true
 			m.entries = nil
 			return m, tea.Batch(m.spinner.Tick, func() tea.Msg {
-				return profileScanMsg{} // placeholder, real scan in app.go
+				return profileScanMsg{}
 			})
 		}
 
@@ -95,12 +120,32 @@ func (m profileModel) Update(msg tea.Msg) (profileModel, tea.Cmd) {
 		}
 	}
 
-	if !m.scanning {
+	if !m.scanning && m.step == profileStepURL {
 		var cmd tea.Cmd
 		m.input, cmd = m.input.Update(msg)
 		return m, cmd
 	}
 	return m, nil
+}
+
+func (m profileModel) updateFolderStep(msg tea.KeyMsg) (profileModel, tea.Cmd) {
+	switch msg.String() {
+	case "enter", "ctrl+d":
+		url := strings.TrimSpace(m.input.Value())
+		subfolder := strings.TrimSpace(m.folderInput.Value())
+		entries := m.entries
+		return m, func() tea.Msg {
+			return submitProfileMsg{url: url, entries: entries, subfolder: subfolder}
+		}
+	case "esc":
+		m.step = profileStepURL
+		m.folderInput.Blur()
+		m.input.Focus()
+		return m, textinput.Blink
+	}
+	var cmd tea.Cmd
+	m.folderInput, cmd = m.folderInput.Update(msg)
+	return m, cmd
 }
 
 func (m profileModel) View() string {
@@ -121,11 +166,18 @@ func (m profileModel) View() string {
 			m.spinner.View()+" Dang scan profile...\n\n"+
 				mutedStyle.Render("Co the mat vai phut tuy so luong video."),
 		)
+	} else if m.step == profileStepFolder {
+		content = "\n\n" + successStyle.Render(fmt.Sprintf("%d video", len(m.entries))) +
+			mutedStyle.Render(" san sang tai") + "\n\n" +
+			activeBoxStyle.Render(
+				subtitleStyle.Render("Ten thu muc con (de trong = khong tao):")+"\n\n"+
+					m.folderInput.View(),
+			)
 	} else if len(m.entries) > 0 {
 		content = "\n\n" + activeBoxStyle.Render(
 			successStyle.Render(fmt.Sprintf("Tim thay %d video!", len(m.entries)))+"\n\n"+
 				m.entriesPreview()+"\n\n"+
-				lipgloss.NewStyle().Foreground(colorSecondary).Render("Nhan enter de tai tat ca"),
+				lipgloss.NewStyle().Foreground(colorSecondary).Render("Nhan enter de chon thu muc va tai"),
 		)
 	} else {
 		content = "\n\n" + activeBoxStyle.Render(
@@ -138,7 +190,12 @@ func (m profileModel) View() string {
 		content += "\n" + errorStyle.Render(m.err)
 	}
 
-	help := "\n" + helpStyle.Render("enter: scan/tai  |  esc: quay lai")
+	var help string
+	if m.step == profileStepFolder {
+		help = "\n" + helpStyle.Render("enter: bat dau tai  |  esc: quay lai")
+	} else {
+		help = "\n" + helpStyle.Render("enter: scan/tiep tuc  |  esc: quay lai")
+	}
 
 	return header + info + content + help
 }
