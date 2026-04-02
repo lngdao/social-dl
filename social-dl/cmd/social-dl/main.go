@@ -11,7 +11,12 @@ import (
 var version = "dev"
 
 func main() {
-	app, err := tui.NewApp(version)
+	// Strip v prefix if injected from git tag (e.g. "v2026.402.1" → "2026.402.1")
+	v := version
+	if len(v) > 0 && v[0] == 'v' {
+		v = v[1:]
+	}
+	app, err := tui.NewApp(v)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
 		os.Exit(1)

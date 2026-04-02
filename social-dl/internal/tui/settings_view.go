@@ -15,6 +15,7 @@ type settingsField int
 const (
 	fieldAudio settingsField = iota
 	fieldQuality
+	fieldConcurrency
 	fieldOutputDir
 	fieldArchive
 	fieldVerbose
@@ -71,20 +72,39 @@ func (m settingsViewModel) Update(msg tea.Msg) (settingsViewModel, tea.Cmd) {
 				return m, textinput.Blink
 			case fieldArchive:
 				m.settings.UseArchive = !m.settings.UseArchive
+			case fieldConcurrency:
+				m.settings.Concurrency++
+				if m.settings.Concurrency > 10 {
+					m.settings.Concurrency = 1
+				}
 			case fieldVerbose:
 				m.settings.VerboseLog = !m.settings.VerboseLog
 			}
 			saveSettings(m.settings)
 			return m, func() tea.Msg { return settingsSavedMsg{} }
 		case "left", "h":
-			if m.cursor == fieldQuality {
+			switch m.cursor {
+			case fieldQuality:
 				m.settings.Quality = prevQuality(m.settings.Quality)
+				saveSettings(m.settings)
+				return m, func() tea.Msg { return settingsSavedMsg{} }
+			case fieldConcurrency:
+				if m.settings.Concurrency > 1 {
+					m.settings.Concurrency--
+				}
 				saveSettings(m.settings)
 				return m, func() tea.Msg { return settingsSavedMsg{} }
 			}
 		case "right", "l":
-			if m.cursor == fieldQuality {
+			switch m.cursor {
+			case fieldQuality:
 				m.settings.Quality = nextQuality(m.settings.Quality)
+				saveSettings(m.settings)
+				return m, func() tea.Msg { return settingsSavedMsg{} }
+			case fieldConcurrency:
+				if m.settings.Concurrency < 10 {
+					m.settings.Concurrency++
+				}
 				saveSettings(m.settings)
 				return m, func() tea.Msg { return settingsSavedMsg{} }
 			}
@@ -124,6 +144,7 @@ func (m settingsViewModel) View() string {
 	}{
 		{fieldAudio, "Bao gom audio", toggleView(m.settings.IncludeAudio)},
 		{fieldQuality, "Chat luong", qualityView(m.settings.Quality)},
+		{fieldConcurrency, "Song song", concurrencyView(m.settings.Concurrency)},
 		{fieldOutputDir, "Thu muc luu", m.settings.OutputDir},
 		{fieldArchive, "Bo qua da tai", toggleView(m.settings.UseArchive)},
 		{fieldVerbose, "Ghi log debug", verboseView(m.settings.VerboseLog)},
@@ -165,6 +186,18 @@ func (m settingsViewModel) View() string {
 	}
 
 	return header + boxStyle.Render(content) + help
+}
+
+func concurrencyView(n int) string {
+	bar := ""
+	for i := 1; i <= 10; i++ {
+		if i <= n {
+			bar += lipgloss.NewStyle().Foreground(colorPrimary).Bold(true).Render("█")
+		} else {
+			bar += mutedStyle.Render("░")
+		}
+	}
+	return fmt.Sprintf("< %s > %d", bar, n)
 }
 
 func verboseView(on bool) string {

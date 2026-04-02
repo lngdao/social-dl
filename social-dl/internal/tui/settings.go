@@ -14,6 +14,7 @@ type AppSettings struct {
 	Quality      string `json:"quality"`       // "best", "1080p", "720p", "480p"
 	OutputDir    string `json:"output_dir"`     // thư mục lưu video
 	UseArchive   bool   `json:"use_archive"`    // skip video đã tải
+	Concurrency  int    `json:"concurrency"`    // số lượng tải song song (batch)
 	CookieFile   string `json:"cookie_file"`    // path tới cookies.txt (optional)
 	VerboseLog   bool   `json:"verbose_log"`    // ghi log yt-dlp ra file
 }
@@ -29,6 +30,7 @@ func defaultSettings() AppSettings {
 		Quality:      "best",
 		OutputDir:    dlDir,
 		UseArchive:   true,
+		Concurrency:  3,
 	}
 }
 
@@ -44,9 +46,11 @@ func loadSettings() AppSettings {
 		return s
 	}
 	json.Unmarshal(data, &s)
-	// Ensure output dir is valid
 	if s.OutputDir == "" {
 		s.OutputDir = defaultSettings().OutputDir
+	}
+	if s.Concurrency < 1 || s.Concurrency > 10 {
+		s.Concurrency = 3
 	}
 	return s
 }

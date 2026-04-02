@@ -5,10 +5,14 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sync"
+	"sync/atomic"
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/lipgloss"
 	"github.com/lngdao/social-dl/internal/deps"
+	"github.com/lngdao/social-dl/internal/updater"
 	"github.com/lngdao/social-dl/internal/ytdlp"
 )
 
@@ -16,6 +20,7 @@ type viewState int
 
 const (
 	viewSetup viewState = iota
+	viewUpdatePrompt
 	viewHome
 	viewSingle
 	viewBatch
@@ -25,6 +30,11 @@ const (
 	viewProgress
 	viewHistory
 )
+
+// Update check messages
+type updateCheckMsg struct{ version string }
+type updateDoneMsg struct{ err error }
+type updateSkipMsg struct{}
 
 type App struct {
 	state    viewState
@@ -47,6 +57,8 @@ type App struct {
 	currentURL      string
 	currentPlatform string
 	program         *tea.Program
+	updateVersion   string // available update version, empty if none
+	updating        bool   // currently updating
 }
 
 func NewApp(version string) (*App, error) {
@@ -80,19 +92,68 @@ func (a *App) SetProgram(p *tea.Program) {
 }
 
 func (a App) Init() tea.Cmd {
+	cmds := []tea.Cmd{a.checkForUpdate()}
 	switch a.state {
 	case viewSetup:
-		return a.setup.Init()
-	case viewHome:
-		return nil
+		cmds = append(cmds, a.setup.Init())
 	}
-	return nil
+	return tea.Batch(cmds...)
+}
+
+func (a App) checkForUpdate() tea.Cmd {
+	ver := a.version
+	return func() tea.Msg {
+		latest, err := updater.CheckLatest()
+		if err != nil || !updater.IsNewer(ver, latest) {
+			return updateSkipMsg{}
+		}
+		return updateCheckMsg{version: latest}
+	}
 }
 
 func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	// Global
 	switch msg := msg.(type) {
+	case updateCheckMsg:
+		// Update available — show prompt (unless in setup)
+		if a.state == viewSetup {
+			a.updateVersion = msg.version // show after setup
+			return &a, nil
+		}
+		a.updateVersion = msg.version
+		a.state = viewUpdatePrompt
+		return &a, nil
+
+	case updateSkipMsg:
+		return &a, nil
+
+	case updateDoneMsg:
+		a.updating = false
+		if msg.err != nil {
+			// Update failed, continue to home
+			a.state = viewHome
+			a.home = newHomeModel(a.version, a.appSettings)
+			return &a, nil
+		}
+		// Updated successfully, quit so user restarts
+		return &a, tea.Quit
+
 	case tea.KeyMsg:
+		// Handle update prompt
+		if a.state == viewUpdatePrompt {
+			switch msg.String() {
+			case "y", "Y", "enter":
+				a.updating = true
+				return &a, func() tea.Msg {
+					err := updater.SelfUpdate(nil)
+					return updateDoneMsg{err: err}
+				}
+			case "n", "N", "esc", "q":
+				return a.goHome()
+			}
+			return &a, nil
+		}
+
 		switch msg.String() {
 		case "ctrl+c":
 			return &a, tea.Quit
@@ -162,6 +223,11 @@ func (a App) updateSetup(msg tea.Msg) (tea.Model, tea.Cmd) {
 	if a.setup.done {
 		paths, _, _ := deps.Check()
 		a.paths = paths
+		// If update was detected during setup, show prompt now
+		if a.updateVersion != "" {
+			a.state = viewUpdatePrompt
+			return &a, nil
+		}
 		return a.goHome()
 	}
 	return &a, cmd
@@ -340,6 +406,8 @@ func (a App) View() string {
 	switch a.state {
 	case viewSetup:
 		return a.setup.View()
+	case viewUpdatePrompt:
+		return header + a.updatePromptView()
 	case viewHome:
 		return a.home.View()
 	case viewSingle:
@@ -359,6 +427,24 @@ func (a App) View() string {
 	}
 
 	return header + content
+}
+
+func (a App) updatePromptView() string {
+	if a.updating {
+		return activeBoxStyle.Render(
+			lipgloss.NewStyle().Foreground(colorSecondary).Bold(true).
+				Render("Dang cap nhat...") + "\n\n" +
+				mutedStyle.Render("Tai phien ban moi tu GitHub..."),
+		)
+	}
+	return activeBoxStyle.Render(
+		warnStyle.Render("Co phien ban moi!") + "\n\n" +
+			mutedStyle.Render("Hien tai: ") +
+			lipgloss.NewStyle().Foreground(colorText).Render("v"+a.version) + "\n" +
+			mutedStyle.Render("Moi nhat: ") +
+			successStyle.Render(a.updateVersion) + "\n\n" +
+			lipgloss.NewStyle().Foreground(colorText).Bold(true).Render("Cap nhat ngay? [Y/n]"),
+	)
 }
 
 // ================== Commands ==================
@@ -434,81 +520,111 @@ func (a App) startBatchDownload(urls []string, subfolder string) tea.Cmd {
 	settings := a.appSettings
 	paths := a.paths
 	fmtSpec := a.formatSpec()
+	concurrency := settings.Concurrency
+	if concurrency < 1 {
+		concurrency = 3
+	}
+
 	return func() tea.Msg {
-		// Resolve output dir, create subfolder if specified
 		outputDir := settings.OutputDir
 		if subfolder != "" {
 			outputDir = filepath.Join(outputDir, subfolder)
 			os.MkdirAll(outputDir, 0755)
 		}
 
-		succeeded := 0
-		failed := 0
+		var succeeded, failed atomic.Int32
+		var wg sync.WaitGroup
+		sem := make(chan struct{}, concurrency)
 
 		for i, url := range urls {
-			// Fetch metadata first
-			title := url
-			platform := ""
-			metaCtx, metaCancel := context.WithTimeout(context.Background(), 15*time.Second)
-			meta, metaErr := ytdlp.FetchMeta(metaCtx, paths.YtDlp, url)
-			metaCancel()
-			if metaErr == nil && meta != nil {
-				if meta.Title != "" {
-					title = meta.Title
+			wg.Add(1)
+			go func(idx int, u string) {
+				defer wg.Done()
+				sem <- struct{}{}        // acquire
+				defer func() { <-sem }() // release
+
+				// Fetch title inline via yt-dlp --print
+				title := u
+				platform := ""
+				metaCtx, metaCancel := context.WithTimeout(context.Background(), 15*time.Second)
+				meta, metaErr := ytdlp.FetchMeta(metaCtx, paths.YtDlp, u)
+				metaCancel()
+				if metaErr == nil && meta != nil {
+					if meta.Title != "" {
+						title = meta.Title
+					}
+					platform = meta.Extractor
 				}
-				platform = meta.Extractor
-			}
 
-			if program != nil {
-				program.Send(batchItemStartMsg{
-					index: i,
-					total: len(urls),
-					title: title,
-				})
-			}
-
-			opts := ytdlp.DownloadOpts{
-				YtDlpPath:    paths.YtDlp,
-				FfmpegDir:    paths.BinDir,
-				URL:          url,
-				FormatSpec:   fmtSpec,
-				OutputDir:    outputDir,
-				IncludeAudio: settings.IncludeAudio,
-				CookieFile:   settings.CookieFile,
-			}
-			if settings.UseArchive {
-				opts.ArchiveFile = archivePath()
-			}
-			if settings.VerboseLog {
-				opts.LogFile = logFilePath()
-			}
-
-			ctx := context.Background()
-			filePath, err := ytdlp.Download(ctx, opts, func(p ytdlp.Progress) {
 				if program != nil {
-					program.Send(downloadProgressMsg{progress: p})
+					program.Send(batchItemStartMsg{
+						index: idx,
+						total: len(urls),
+						title: title,
+					})
 				}
-			})
 
-			if err != nil {
-				failed++
-			} else {
-				succeeded++
-				SaveHistory(HistoryEntry{
-					Title:      title,
-					URL:        url,
-					FilePath:   filePath,
-					Platform:   platform,
-					DownloadAt: time.Now(),
-				})
-			}
+				opts := ytdlp.DownloadOpts{
+					YtDlpPath:    paths.YtDlp,
+					FfmpegDir:    paths.BinDir,
+					URL:          u,
+					FormatSpec:   fmtSpec,
+					OutputDir:    outputDir,
+					IncludeAudio: settings.IncludeAudio,
+					CookieFile:   settings.CookieFile,
+				}
+				if settings.UseArchive {
+					opts.ArchiveFile = archivePath()
+				}
+				if settings.VerboseLog {
+					opts.LogFile = logFilePath()
+				}
 
-			if program != nil {
-				program.Send(batchItemDoneMsg{index: i, total: len(urls)})
-			}
+				// Try download with 1 retry on failure
+				var filePath string
+				var err error
+				for attempt := 0; attempt < 2; attempt++ {
+					ctx := context.Background()
+					filePath, err = ytdlp.Download(ctx, opts, func(p ytdlp.Progress) {
+						if program != nil {
+							program.Send(downloadProgressMsg{progress: p})
+						}
+					})
+					if err == nil {
+						break
+					}
+					if attempt == 0 {
+						time.Sleep(2 * time.Second) // brief pause before retry
+					}
+				}
+
+				if err != nil {
+					failed.Add(1)
+				} else {
+					succeeded.Add(1)
+					SaveHistory(HistoryEntry{
+						Title:    title,
+						URL:      u,
+						FilePath: filePath,
+						Platform: platform,
+						DownloadAt: time.Now(),
+					})
+				}
+
+				if program != nil {
+					program.Send(batchItemDoneMsg{
+						index: idx,
+						total: len(urls),
+					})
+				}
+			}(i, url)
 		}
 
-		return batchDoneMsg{succeeded: succeeded, failed: failed}
+		wg.Wait()
+		return batchDoneMsg{
+			succeeded: int(succeeded.Load()),
+			failed:    int(failed.Load()),
+		}
 	}
 }
 
