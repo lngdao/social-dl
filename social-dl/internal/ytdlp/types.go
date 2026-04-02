@@ -35,10 +35,11 @@ type Quality struct {
 
 // Progress là trạng thái download real-time.
 type Progress struct {
-	Status  string  // "downloading", "finished", "error"
-	Percent float64 // 0-100
-	Speed   string  // "5.2MiB/s"
-	ETA     string  // "00:23"
+	Status     string  // "downloading", "finished", "error"
+	Percent    float64 // 0-100
+	Speed      string  // "5.2MiB/s"
+	ETA        string  // "00:23"
+	Downloaded string  // "12.5MiB"
 }
 
 // PlaylistEntry là 1 entry từ --flat-playlist -j.

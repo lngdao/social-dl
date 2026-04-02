@@ -36,7 +36,7 @@ func Download(ctx context.Context, opts DownloadOpts, onProgress func(Progress))
 		"-o", filepath.Join(opts.OutputDir, "%(title).80s [%(id)s].%(ext)s"),
 		"--newline",
 		"--progress",
-		"--progress-template", `download:{"status":"%(progress.status)s","percent":"%(progress._percent_str)s","speed":"%(progress._speed_str)s","eta":"%(progress._eta_str)s"}`,
+		"--progress-template", `download:{"status":"%(progress.status)s","percent":"%(progress._percent_str)s","speed":"%(progress._speed_str)s","eta":"%(progress._eta_str)s","downloaded":"%(progress._downloaded_bytes_str)s"}`,
 		"--no-warnings",
 		"--no-playlist",
 	}
@@ -147,7 +147,7 @@ func DownloadPlaylist(ctx context.Context, opts DownloadOpts, onProgress func(Pr
 		"-o", filepath.Join(opts.OutputDir, "%(title).80s [%(id)s].%(ext)s"),
 		"--newline",
 		"--progress",
-		"--progress-template", `download:{"status":"%(progress.status)s","percent":"%(progress._percent_str)s","speed":"%(progress._speed_str)s","eta":"%(progress._eta_str)s"}`,
+		"--progress-template", `download:{"status":"%(progress.status)s","percent":"%(progress._percent_str)s","speed":"%(progress._speed_str)s","eta":"%(progress._eta_str)s","downloaded":"%(progress._downloaded_bytes_str)s"}`,
 		"--no-warnings",
 		"--yes-playlist",
 	}
@@ -204,17 +204,19 @@ func tryParseProgress(line string, onProgress func(Progress)) {
 	if strings.HasPrefix(line, "download:") {
 		jsonStr := strings.TrimPrefix(line, "download:")
 		var raw struct {
-			Status  string `json:"status"`
-			Percent string `json:"percent"`
-			Speed   string `json:"speed"`
-			ETA     string `json:"eta"`
+			Status     string `json:"status"`
+			Percent    string `json:"percent"`
+			Speed      string `json:"speed"`
+			ETA        string `json:"eta"`
+			Downloaded string `json:"downloaded"`
 		}
 		if json.Unmarshal([]byte(jsonStr), &raw) == nil {
 			onProgress(Progress{
-				Status:  raw.Status,
-				Percent: parsePercent(raw.Percent),
-				Speed:   raw.Speed,
-				ETA:     raw.ETA,
+				Status:     raw.Status,
+				Percent:    parsePercent(raw.Percent),
+				Speed:      raw.Speed,
+				ETA:        raw.ETA,
+				Downloaded: raw.Downloaded,
 			})
 			return
 		}

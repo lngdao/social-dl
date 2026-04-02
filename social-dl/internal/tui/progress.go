@@ -36,9 +36,10 @@ type batchDoneMsg struct {
 
 // Active download tracking for concurrent batch
 type activeDownload struct {
-	title   string
-	percent float64
-	speed   string
+	title      string
+	percent    float64
+	speed      string
+	downloaded string // "12.5MiB"
 }
 
 type progressModel struct {
@@ -96,6 +97,7 @@ func (m progressModel) Update(msg tea.Msg) (progressModel, tea.Cmd) {
 			if dl, ok := m.active[msg.index]; ok {
 				dl.percent = msg.progress.Percent / 100
 				dl.speed = msg.progress.Speed
+				dl.downloaded = msg.progress.Downloaded
 			}
 		} else {
 			m.percent = msg.progress.Percent / 100
@@ -238,21 +240,29 @@ func (m progressModel) batchView() string {
 				activeList += mutedStyle.Render(fmt.Sprintf("  ... +%d khac\n", remaining))
 				break
 			}
-			pct := lipgloss.NewStyle().Foreground(colorPrimary).Bold(true).
-				Render(fmt.Sprintf("%3.0f%%", dl.percent*100))
+			title := lipgloss.NewStyle().Foreground(colorText).Render(truncate(dl.title, 40))
 			spd := ""
 			if dl.speed != "" && dl.speed != "N/A" {
-				spd = "  " + lipgloss.NewStyle().Foreground(colorSecondary).Render(dl.speed)
+				spd = lipgloss.NewStyle().Foreground(colorSecondary).Render(dl.speed)
 			}
-			title := lipgloss.NewStyle().Foreground(colorText).Render(truncate(dl.title, 40))
 
-			// Mini progress bar
-			barWidth := 20
-			filled := int(dl.percent * float64(barWidth))
-			bar := lipgloss.NewStyle().Foreground(colorPrimary).Render(strings.Repeat("█", filled)) +
-				lipgloss.NewStyle().Foreground(colorDim).Render(strings.Repeat("░", barWidth-filled))
-
-			activeList += fmt.Sprintf("%s %s %s%s\n", pct, bar, title, spd)
+			if dl.percent > 0 {
+				// Known progress: show bar
+				pct := lipgloss.NewStyle().Foreground(colorPrimary).Bold(true).
+					Render(fmt.Sprintf("%3.0f%%", dl.percent*100))
+				barWidth := 15
+				filled := int(dl.percent * float64(barWidth))
+				bar := lipgloss.NewStyle().Foreground(colorPrimary).Render(strings.Repeat("█", filled)) +
+					lipgloss.NewStyle().Foreground(colorDim).Render(strings.Repeat("░", barWidth-filled))
+				activeList += fmt.Sprintf("  %s %s %s  %s\n", pct, bar, title, spd)
+			} else {
+				// Unknown progress (Facebook etc): show spinner + downloaded size + speed
+				dlSize := ""
+				if dl.downloaded != "" && dl.downloaded != "N/A" {
+					dlSize = lipgloss.NewStyle().Foreground(colorPrimary).Bold(true).Render(dl.downloaded)
+				}
+				activeList += fmt.Sprintf("  %s %s %s  %s\n", m.spinner.View(), dlSize, title, spd)
+			}
 			count++
 		}
 
