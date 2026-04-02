@@ -505,7 +505,7 @@ func (a App) startSingleDownload(meta *ytdlp.VideoMeta, quality ytdlp.Quality) t
 		ctx := context.Background()
 		filePath, err := ytdlp.Download(ctx, opts, func(p ytdlp.Progress) {
 			if program != nil {
-				program.Send(downloadProgressMsg{progress: p})
+				program.Send(downloadProgressMsg{progress: p, index: -1})
 			}
 		})
 		if err != nil {
@@ -513,6 +513,13 @@ func (a App) startSingleDownload(meta *ytdlp.VideoMeta, quality ytdlp.Quality) t
 		}
 		return downloadDoneMsg{filePath: filePath}
 	}
+}
+
+type batchItem struct {
+	index    int
+	url      string
+	title    string
+	platform string
 }
 
 func (a App) startBatchDownload(urls []string, subfolder string) tea.Cmd {
@@ -532,42 +539,57 @@ func (a App) startBatchDownload(urls []string, subfolder string) tea.Cmd {
 			os.MkdirAll(outputDir, 0755)
 		}
 
-		var succeeded, failed atomic.Int32
-		var wg sync.WaitGroup
-		sem := make(chan struct{}, concurrency)
+		total := len(urls)
 
+		// Phase 1: Fetch all metadata in parallel (fast, no download)
+		items := make([]batchItem, total)
+		var metaWg sync.WaitGroup
+		metaSem := make(chan struct{}, 5) // 5 concurrent metadata fetches
 		for i, url := range urls {
-			wg.Add(1)
+			items[i] = batchItem{index: i, url: url, title: url}
+			metaWg.Add(1)
 			go func(idx int, u string) {
-				defer wg.Done()
-				sem <- struct{}{}        // acquire
-				defer func() { <-sem }() // release
+				defer metaWg.Done()
+				metaSem <- struct{}{}
+				defer func() { <-metaSem }()
 
-				// Fetch title inline via yt-dlp --print
-				title := u
-				platform := ""
-				metaCtx, metaCancel := context.WithTimeout(context.Background(), 15*time.Second)
-				meta, metaErr := ytdlp.FetchMeta(metaCtx, paths.YtDlp, u)
-				metaCancel()
-				if metaErr == nil && meta != nil {
+				metaCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+				defer cancel()
+				meta, err := ytdlp.FetchMeta(metaCtx, paths.YtDlp, u)
+				if err == nil && meta != nil {
 					if meta.Title != "" {
-						title = meta.Title
+						items[idx].title = meta.Title
 					}
-					platform = meta.Extractor
+					items[idx].platform = meta.Extractor
 				}
+			}(i, url)
+		}
+		metaWg.Wait()
+
+		// Phase 2: Download all in parallel with concurrency limit
+		var succeeded, failed atomic.Int32
+		var dlWg sync.WaitGroup
+		dlSem := make(chan struct{}, concurrency)
+
+		for _, item := range items {
+			dlWg.Add(1)
+			go func(it batchItem) {
+				defer dlWg.Done()
+				dlSem <- struct{}{}
+				defer func() { <-dlSem }()
 
 				if program != nil {
 					program.Send(batchItemStartMsg{
-						index: idx,
-						total: len(urls),
-						title: title,
+						index: it.index,
+						total: total,
+						title: it.title,
 					})
 				}
 
 				opts := ytdlp.DownloadOpts{
 					YtDlpPath:    paths.YtDlp,
 					FfmpegDir:    paths.BinDir,
-					URL:          u,
+					URL:          it.url,
 					FormatSpec:   fmtSpec,
 					OutputDir:    outputDir,
 					IncludeAudio: settings.IncludeAudio,
@@ -580,21 +602,22 @@ func (a App) startBatchDownload(urls []string, subfolder string) tea.Cmd {
 					opts.LogFile = logFilePath()
 				}
 
-				// Try download with 1 retry on failure
+				// Download with 1 retry
+				idx := it.index
 				var filePath string
 				var err error
 				for attempt := 0; attempt < 2; attempt++ {
 					ctx := context.Background()
 					filePath, err = ytdlp.Download(ctx, opts, func(p ytdlp.Progress) {
 						if program != nil {
-							program.Send(downloadProgressMsg{progress: p})
+							program.Send(downloadProgressMsg{progress: p, index: idx})
 						}
 					})
 					if err == nil {
 						break
 					}
 					if attempt == 0 {
-						time.Sleep(2 * time.Second) // brief pause before retry
+						time.Sleep(2 * time.Second)
 					}
 				}
 
@@ -603,24 +626,21 @@ func (a App) startBatchDownload(urls []string, subfolder string) tea.Cmd {
 				} else {
 					succeeded.Add(1)
 					SaveHistory(HistoryEntry{
-						Title:    title,
-						URL:      u,
-						FilePath: filePath,
-						Platform: platform,
+						Title:      it.title,
+						URL:        it.url,
+						FilePath:   filePath,
+						Platform:   it.platform,
 						DownloadAt: time.Now(),
 					})
 				}
 
 				if program != nil {
-					program.Send(batchItemDoneMsg{
-						index: idx,
-						total: len(urls),
-					})
+					program.Send(batchItemDoneMsg{index: it.index, total: total})
 				}
-			}(i, url)
+			}(item)
 		}
 
-		wg.Wait()
+		dlWg.Wait()
 		return batchDoneMsg{
 			succeeded: int(succeeded.Load()),
 			failed:    int(failed.Load()),

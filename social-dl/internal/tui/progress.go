@@ -2,6 +2,8 @@ package tui
 
 import (
 	"fmt"
+	"strings"
+	"sync"
 
 	"github.com/charmbracelet/bubbles/progress"
 	"github.com/charmbracelet/bubbles/spinner"
@@ -10,7 +12,10 @@ import (
 	"github.com/lngdao/social-dl/internal/ytdlp"
 )
 
-type downloadProgressMsg struct{ progress ytdlp.Progress }
+type downloadProgressMsg struct {
+	progress ytdlp.Progress
+	index    int // -1 for single mode
+}
 type downloadDoneMsg struct{ filePath string }
 type downloadErrorMsg struct{ err error }
 
@@ -29,25 +34,34 @@ type batchDoneMsg struct {
 	failed    int
 }
 
+// Active download tracking for concurrent batch
+type activeDownload struct {
+	title   string
+	percent float64
+	speed   string
+}
+
 type progressModel struct {
-	spinner      spinner.Model
-	progressBar  progress.Model // per-video progress
-	overallBar   progress.Model // batch overall progress
-	title        string
-	percent      float64
-	speed        string
-	eta          string
-	status       string // "downloading", "merging", "finished", "error"
-	filePath     string
-	err          error
+	spinner     spinner.Model
+	progressBar progress.Model
+	title       string
+	percent     float64
+	speed       string
+	eta         string
+	status      string // "downloading", "merging", "finished", "error"
+	filePath    string
+	err         error
 
 	// Batch state
 	isBatch      bool
-	batchIndex   int
 	batchTotal   int
+	batchDone    int // completed (success + failed)
 	batchSuccess int
 	batchFailed  int
-	currentTitle string
+
+	// Active concurrent downloads
+	active   map[int]*activeDownload
+	activeMu sync.Mutex
 }
 
 func newProgressModel(title string, isBatch bool) progressModel {
@@ -66,6 +80,7 @@ func newProgressModel(title string, isBatch bool) progressModel {
 		title:       title,
 		status:      "downloading",
 		isBatch:     isBatch,
+		active:      make(map[int]*activeDownload),
 	}
 }
 
@@ -76,32 +91,40 @@ func (m progressModel) Init() tea.Cmd {
 func (m progressModel) Update(msg tea.Msg) (progressModel, tea.Cmd) {
 	switch msg := msg.(type) {
 	case downloadProgressMsg:
-		m.percent = msg.progress.Percent / 100
-		m.speed = msg.progress.Speed
-		m.eta = msg.progress.ETA
-		if msg.progress.Status == "finished" && !m.isBatch {
-			m.status = "merging"
+		if m.isBatch && msg.index >= 0 {
+			// Update per-video progress
+			if dl, ok := m.active[msg.index]; ok {
+				dl.percent = msg.progress.Percent / 100
+				dl.speed = msg.progress.Speed
+			}
+		} else {
+			m.percent = msg.progress.Percent / 100
+			m.speed = msg.progress.Speed
+			m.eta = msg.progress.ETA
+			if msg.progress.Status == "finished" && !m.isBatch {
+				m.status = "merging"
+			}
 		}
 		return m, nil
 
 	case batchItemStartMsg:
-		m.batchIndex = msg.index
 		m.batchTotal = msg.total
-		m.currentTitle = msg.title
-		m.percent = 0
-		m.speed = ""
-		m.eta = ""
-		m.status = "downloading"
+		m.active[msg.index] = &activeDownload{
+			title:   msg.title,
+			percent: 0,
+		}
 		return m, nil
 
 	case batchItemDoneMsg:
-		m.batchSuccess++
+		delete(m.active, msg.index)
+		m.batchDone++
 		return m, nil
 
 	case batchDoneMsg:
 		m.status = "finished"
 		m.batchSuccess = msg.succeeded
 		m.batchFailed = msg.failed
+		m.batchDone = msg.succeeded + msg.failed
 		return m, nil
 
 	case downloadDoneMsg:
@@ -157,7 +180,20 @@ func (m progressModel) singleView() string {
 		)
 
 	default:
-		return m.downloadingView(m.title)
+		stats := ""
+		if m.speed != "" && m.speed != "N/A" {
+			stats += "  " + lipgloss.NewStyle().Foreground(colorSecondary).Render(m.speed)
+		}
+		if m.eta != "" && m.eta != "N/A" {
+			stats += "  " + mutedStyle.Render("ETA: "+m.eta)
+		}
+		pctText := lipgloss.NewStyle().Foreground(colorPrimary).Bold(true).
+			Render(fmt.Sprintf("%.1f%%", m.percent*100))
+		return activeBoxStyle.Render(
+			lipgloss.NewStyle().Foreground(colorText).Bold(true).Render(truncate(m.title, 50))+"\n\n"+
+				m.progressBar.ViewAs(m.percent)+"\n"+
+				pctText+stats,
+		)
 	}
 }
 
@@ -173,46 +209,57 @@ func (m progressModel) batchView() string {
 			helpStyle.Render("enter: quay lai  |  q: thoat")
 
 	default:
-		// Overall progress
-		overall := ""
+		// Overall progress bar
+		overallPct := 0.0
 		if m.batchTotal > 0 {
-			overallPct := float64(m.batchIndex) / float64(m.batchTotal)
-			counter := lipgloss.NewStyle().Foreground(colorSecondary).Bold(true).
-				Render(fmt.Sprintf("[%d/%d]", m.batchIndex+1, m.batchTotal))
-			overall = counter + "  " +
-				successStyle.Render(fmt.Sprintf("%d OK", m.batchSuccess))
-			if m.batchFailed > 0 {
-				overall += "  " + errorStyle.Render(fmt.Sprintf("%d loi", m.batchFailed))
+			overallPct = float64(m.batchDone) / float64(m.batchTotal)
+		}
+
+		counter := lipgloss.NewStyle().Foreground(colorSecondary).Bold(true).
+			Render(fmt.Sprintf("[%d/%d]", m.batchDone, m.batchTotal))
+		stats := counter + "  " + successStyle.Render(fmt.Sprintf("%d OK", m.batchSuccess))
+		if m.batchFailed > 0 {
+			stats += "  " + errorStyle.Render(fmt.Sprintf("%d loi", m.batchFailed))
+		}
+		activeCount := len(m.active)
+		if activeCount > 0 {
+			stats += "  " + lipgloss.NewStyle().Foreground(colorPrimary).
+				Render(fmt.Sprintf("%d dang tai", activeCount))
+		}
+
+		overall := stats + "\n" + m.progressBar.ViewAs(overallPct) + "\n"
+
+		// Active downloads list with per-video progress
+		activeList := ""
+		count := 0
+		for _, dl := range m.active {
+			if count >= 5 {
+				remaining := activeCount - 5
+				activeList += mutedStyle.Render(fmt.Sprintf("  ... +%d khac\n", remaining))
+				break
 			}
-			overall += "\n" + m.progressBar.ViewAs(overallPct) + "\n\n"
+			pct := lipgloss.NewStyle().Foreground(colorPrimary).Bold(true).
+				Render(fmt.Sprintf("%3.0f%%", dl.percent*100))
+			spd := ""
+			if dl.speed != "" && dl.speed != "N/A" {
+				spd = "  " + lipgloss.NewStyle().Foreground(colorSecondary).Render(dl.speed)
+			}
+			title := lipgloss.NewStyle().Foreground(colorText).Render(truncate(dl.title, 40))
+
+			// Mini progress bar
+			barWidth := 20
+			filled := int(dl.percent * float64(barWidth))
+			bar := lipgloss.NewStyle().Foreground(colorPrimary).Render(strings.Repeat("█", filled)) +
+				lipgloss.NewStyle().Foreground(colorDim).Render(strings.Repeat("░", barWidth-filled))
+
+			activeList += fmt.Sprintf("%s %s %s%s\n", pct, bar, title, spd)
+			count++
 		}
 
-		// Current item
-		title := m.currentTitle
-		if title == "" {
-			title = m.title
+		if activeList == "" {
+			activeList = m.spinner.View() + " Dang chuan bi...\n"
 		}
-		current := m.downloadingView(title)
 
-		return overall + current
+		return overall + "\n" + activeBoxStyle.Render(activeList)
 	}
-}
-
-func (m progressModel) downloadingView(title string) string {
-	stats := ""
-	if m.speed != "" && m.speed != "N/A" {
-		stats += "  " + lipgloss.NewStyle().Foreground(colorSecondary).Render(m.speed)
-	}
-	if m.eta != "" && m.eta != "N/A" {
-		stats += "  " + mutedStyle.Render("ETA: "+m.eta)
-	}
-
-	pctText := lipgloss.NewStyle().Foreground(colorPrimary).Bold(true).
-		Render(fmt.Sprintf("%.1f%%", m.percent*100))
-
-	return activeBoxStyle.Render(
-		lipgloss.NewStyle().Foreground(colorText).Bold(true).Render(truncate(title, 50))+"\n\n"+
-			m.progressBar.ViewAs(m.percent)+"\n"+
-			pctText+stats,
-	)
 }
