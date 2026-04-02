@@ -12,26 +12,28 @@ import (
 type metaFetchedMsg struct{ meta *ytdlp.VideoMeta }
 type metaErrorMsg struct{ err error }
 type startDownloadMsg struct {
-	meta    *ytdlp.VideoMeta
-	quality ytdlp.Quality
+	meta         *ytdlp.VideoMeta
+	quality      ytdlp.Quality
+	includeAudio bool
 }
 
 type infoModel struct {
-	spinner   spinner.Model
-	url       string
-	meta      *ytdlp.VideoMeta
-	qualities []ytdlp.Quality
-	cursor    int
-	loading   bool
-	err       error
+	spinner      spinner.Model
+	url          string
+	meta         *ytdlp.VideoMeta
+	qualities    []ytdlp.Quality
+	cursor       int
+	includeAudio bool
+	loading      bool
+	err          error
 }
 
-func newInfoModel(url string) infoModel {
+func newInfoModel(url string, includeAudio bool) infoModel {
 	s := spinner.New()
 	s.Spinner = spinner.Dot
 	s.Style = lipgloss.NewStyle().Foreground(colorPrimary)
 
-	return infoModel{spinner: s, url: url, loading: true}
+	return infoModel{spinner: s, url: url, loading: true, includeAudio: includeAudio}
 }
 
 func (m infoModel) Init() tea.Cmd {
@@ -62,10 +64,16 @@ func (m infoModel) Update(msg tea.Msg) (infoModel, tea.Cmd) {
 			if m.cursor < len(m.qualities)-1 {
 				m.cursor++
 			}
+		case "a":
+			m.includeAudio = !m.includeAudio
 		case "enter":
 			if m.meta != nil && len(m.qualities) > 0 {
 				return m, func() tea.Msg {
-					return startDownloadMsg{meta: m.meta, quality: m.qualities[m.cursor]}
+					return startDownloadMsg{
+						meta:         m.meta,
+						quality:      m.qualities[m.cursor],
+						includeAudio: m.includeAudio,
+					}
 				}
 			}
 		}
@@ -104,8 +112,16 @@ func (m infoModel) View() string {
 			uploader + "  " + duration,
 	)
 
+	// Audio toggle
+	audioTag := ""
+	if m.includeAudio {
+		audioTag = tagSuccessStyle.Render(" AUDIO ON ")
+	} else {
+		audioTag = tagErrorStyle.Render(" NO AUDIO ")
+	}
+
 	// Quality selector
-	qualityList := headingStyle.Render("Chon chat luong:") + "\n"
+	qualityList := headingStyle.Render("Chon chat luong:") + "  " + audioTag + "\n"
 	for i, q := range m.qualities {
 		cursor := "  "
 		style := unselectedStyle
@@ -116,7 +132,7 @@ func (m infoModel) View() string {
 		qualityList += cursor + style.Render(q.Label) + "\n"
 	}
 
-	help := helpStyle.Render("up/down: chon  |  enter: tai  |  esc: quay lai")
+	help := helpStyle.Render("up/down: chon  |  a: bat/tat audio  |  enter: tai  |  esc: quay lai")
 
 	return card + "\n\n" + qualityList + "\n" + help
 }

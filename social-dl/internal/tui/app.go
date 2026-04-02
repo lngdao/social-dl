@@ -273,7 +273,7 @@ func (a App) updateSingle(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case submitURLMsg:
 		a.currentURL = msg.url
 		a.state = viewInfo
-		a.info = newInfoModel(msg.url)
+		a.info = newInfoModel(msg.url, a.appSettings.IncludeAudio)
 		return &a, tea.Batch(a.info.Init(), a.fetchMeta(msg.url))
 	}
 	var cmd tea.Cmd
@@ -358,7 +358,7 @@ func (a App) updateInfo(msg tea.Msg) (tea.Model, tea.Cmd) {
 		a.state = viewProgress
 		a.progress = newProgressModel(msg.meta.Title, false)
 		a.currentPlatform = msg.meta.Extractor
-		return &a, tea.Batch(a.progress.Init(), a.startSingleDownload(msg.meta, msg.quality))
+		return &a, tea.Batch(a.progress.Init(), a.startSingleDownload(msg.meta, msg.quality, msg.includeAudio))
 	}
 	var cmd tea.Cmd
 	a.info, cmd = a.info.Update(msg)
@@ -497,9 +497,10 @@ func (a App) makeDownloadOpts(url string) ytdlp.DownloadOpts {
 	return opts
 }
 
-func (a App) startSingleDownload(meta *ytdlp.VideoMeta, quality ytdlp.Quality) tea.Cmd {
+func (a App) startSingleDownload(meta *ytdlp.VideoMeta, quality ytdlp.Quality, includeAudio bool) tea.Cmd {
 	opts := a.makeDownloadOpts(a.currentURL)
 	opts.FormatSpec = quality.FormatSpec
+	opts.IncludeAudio = includeAudio
 	program := a.program
 	return func() tea.Msg {
 		ctx := context.Background()

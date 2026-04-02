@@ -42,7 +42,9 @@ func Download(ctx context.Context, opts DownloadOpts, onProgress func(Progress))
 	}
 
 	if !opts.IncludeAudio {
-		args = append(args, "--postprocessor-args", "ffmpeg:-an")
+		// --remux-video forces ffmpeg to run even for muxed downloads (TikTok, etc)
+		// so that -an actually strips the audio track
+		args = append(args, "--remux-video", "mp4", "--postprocessor-args", "ffmpeg:-an")
 	}
 
 	if opts.CookieFile != "" {
@@ -153,7 +155,9 @@ func DownloadPlaylist(ctx context.Context, opts DownloadOpts, onProgress func(Pr
 	}
 
 	if !opts.IncludeAudio {
-		args = append(args, "--postprocessor-args", "ffmpeg:-an")
+		// --remux-video forces ffmpeg to run even for muxed downloads (TikTok, etc)
+		// so that -an actually strips the audio track
+		args = append(args, "--remux-video", "mp4", "--postprocessor-args", "ffmpeg:-an")
 	}
 
 	if opts.CookieFile != "" {
