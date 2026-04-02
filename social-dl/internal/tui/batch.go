@@ -167,8 +167,9 @@ func (m batchModel) updateURLStep(msg tea.KeyMsg) (batchModel, tea.Cmd) {
 		m.textarea.Blur()
 		m.fileInput.Blur()
 		m.folderInput.Focus()
-		// Suggest subfolder name with timestamp
-		m.folderInput.SetValue("batch-" + time.Now().Format("2006-01-02"))
+		suggestion := "batch-" + time.Now().Format("2006-01-02")
+		m.folderInput.SetValue(suggestion)
+		m.folderInput.SetCursor(len(suggestion))
 		return m, textinput.Blink
 	}
 	return m, nil
@@ -176,14 +177,20 @@ func (m batchModel) updateURLStep(msg tea.KeyMsg) (batchModel, tea.Cmd) {
 
 func (m batchModel) updateOptionsStep(msg tea.KeyMsg) (batchModel, tea.Cmd) {
 	switch msg.String() {
-	case "ctrl+d", "enter":
+	case "ctrl+d":
+		subfolder := strings.TrimSpace(m.folderInput.Value())
+		urls := m.urls
+		return m, func() tea.Msg {
+			return submitBatchMsg{urls: urls, subfolder: subfolder}
+		}
+	case "enter":
+		// Only submit if folder input is not empty or user explicitly presses enter
 		subfolder := strings.TrimSpace(m.folderInput.Value())
 		urls := m.urls
 		return m, func() tea.Msg {
 			return submitBatchMsg{urls: urls, subfolder: subfolder}
 		}
 	case "esc":
-		// Back to URLs step
 		m.step = stepURLs
 		m.folderInput.Blur()
 		if m.mode == batchModeInput {
@@ -193,7 +200,10 @@ func (m batchModel) updateOptionsStep(msg tea.KeyMsg) (batchModel, tea.Cmd) {
 		m.fileInput.Focus()
 		return m, textinput.Blink
 	}
-	return m, nil
+	// Forward all other keys to folder input (typing, backspace, etc.)
+	var cmd tea.Cmd
+	m.folderInput, cmd = m.folderInput.Update(msg)
+	return m, cmd
 }
 
 func (m batchModel) View() string {
