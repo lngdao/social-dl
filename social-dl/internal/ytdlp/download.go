@@ -35,6 +35,7 @@ func Download(ctx context.Context, opts DownloadOpts, onProgress func(Progress))
 		"--ffmpeg-location", opts.FfmpegDir,
 		"-o", filepath.Join(opts.OutputDir, "%(title).80s [%(id)s].%(ext)s"),
 		"--newline",
+		"--progress",
 		"--progress-template", `download:{"status":"%(progress.status)s","percent":"%(progress._percent_str)s","speed":"%(progress._speed_str)s","eta":"%(progress._eta_str)s"}`,
 		"--no-warnings",
 		"--no-playlist",
@@ -96,23 +97,7 @@ func Download(ctx context.Context, opts DownloadOpts, onProgress func(Progress))
 			fmt.Fprintln(logWriter, line)
 		}
 
-		if strings.HasPrefix(line, "download:") {
-			jsonStr := strings.TrimPrefix(line, "download:")
-			var raw struct {
-				Status  string `json:"status"`
-				Percent string `json:"percent"`
-				Speed   string `json:"speed"`
-				ETA     string `json:"eta"`
-			}
-			if json.Unmarshal([]byte(jsonStr), &raw) == nil && onProgress != nil {
-				onProgress(Progress{
-					Status:  raw.Status,
-					Percent: parsePercent(raw.Percent),
-					Speed:   raw.Speed,
-					ETA:     raw.ETA,
-				})
-			}
-		}
+		tryParseProgress(line, onProgress)
 
 		if strings.Contains(line, "Destination:") {
 			parts := strings.SplitN(line, "Destination:", 2)
@@ -161,6 +146,7 @@ func DownloadPlaylist(ctx context.Context, opts DownloadOpts, onProgress func(Pr
 		"--ffmpeg-location", opts.FfmpegDir,
 		"-o", filepath.Join(opts.OutputDir, "%(title).80s [%(id)s].%(ext)s"),
 		"--newline",
+		"--progress",
 		"--progress-template", `download:{"status":"%(progress.status)s","percent":"%(progress._percent_str)s","speed":"%(progress._speed_str)s","eta":"%(progress._eta_str)s"}`,
 		"--no-warnings",
 		"--yes-playlist",
@@ -196,23 +182,7 @@ func DownloadPlaylist(ctx context.Context, opts DownloadOpts, onProgress func(Pr
 	for scanner.Scan() {
 		line := scanner.Text()
 
-		if strings.HasPrefix(line, "download:") {
-			jsonStr := strings.TrimPrefix(line, "download:")
-			var raw struct {
-				Status  string `json:"status"`
-				Percent string `json:"percent"`
-				Speed   string `json:"speed"`
-				ETA     string `json:"eta"`
-			}
-			if json.Unmarshal([]byte(jsonStr), &raw) == nil && onProgress != nil {
-				onProgress(Progress{
-					Status:  raw.Status,
-					Percent: parsePercent(raw.Percent),
-					Speed:   raw.Speed,
-					ETA:     raw.ETA,
-				})
-			}
-		}
+		tryParseProgress(line, onProgress)
 	}
 
 	return cmd.Wait()
@@ -223,4 +193,65 @@ func parsePercent(s string) float64 {
 	s = strings.TrimSuffix(s, "%")
 	v, _ := strconv.ParseFloat(s, 64)
 	return v
+}
+
+// tryParseProgress attempts to parse a progress line and calls onProgress if successful.
+func tryParseProgress(line string, onProgress func(Progress)) {
+	if onProgress == nil {
+		return
+	}
+	// Method 1: JSON progress template "download:{...}"
+	if strings.HasPrefix(line, "download:") {
+		jsonStr := strings.TrimPrefix(line, "download:")
+		var raw struct {
+			Status  string `json:"status"`
+			Percent string `json:"percent"`
+			Speed   string `json:"speed"`
+			ETA     string `json:"eta"`
+		}
+		if json.Unmarshal([]byte(jsonStr), &raw) == nil {
+			onProgress(Progress{
+				Status:  raw.Status,
+				Percent: parsePercent(raw.Percent),
+				Speed:   raw.Speed,
+				ETA:     raw.ETA,
+			})
+			return
+		}
+	}
+	// Method 2: Standard "[download]  45.2% of ~12.3MiB at 5.2MiB/s ETA 00:02"
+	if strings.Contains(line, "[download]") && strings.Contains(line, "%") {
+		pct := extractPercentFromLine(line)
+		if pct > 0 {
+			onProgress(Progress{
+				Status:  "downloading",
+				Percent: pct,
+				Speed:   extractFieldAfter(line, " at "),
+				ETA:     extractFieldAfter(line, "ETA "),
+			})
+		}
+	}
+}
+
+func extractPercentFromLine(line string) float64 {
+	// Find "XX.X%" pattern in line
+	for _, part := range strings.Fields(line) {
+		if strings.HasSuffix(part, "%") {
+			return parsePercent(part)
+		}
+	}
+	return 0
+}
+
+func extractFieldAfter(line, prefix string) string {
+	idx := strings.Index(line, prefix)
+	if idx < 0 {
+		return ""
+	}
+	rest := line[idx+len(prefix):]
+	fields := strings.Fields(rest)
+	if len(fields) > 0 {
+		return fields[0]
+	}
+	return ""
 }

@@ -16,6 +16,7 @@ const (
 	fieldAudio settingsField = iota
 	fieldQuality
 	fieldConcurrency
+	fieldSkipMeta
 	fieldOutputDir
 	fieldArchive
 	fieldVerbose
@@ -77,6 +78,8 @@ func (m settingsViewModel) Update(msg tea.Msg) (settingsViewModel, tea.Cmd) {
 				if m.settings.Concurrency > 10 {
 					m.settings.Concurrency = 1
 				}
+			case fieldSkipMeta:
+				m.settings.SkipMetadata = !m.settings.SkipMetadata
 			case fieldVerbose:
 				m.settings.VerboseLog = !m.settings.VerboseLog
 			}
@@ -145,6 +148,7 @@ func (m settingsViewModel) View() string {
 		{fieldAudio, "Bao gom audio", toggleView(m.settings.IncludeAudio)},
 		{fieldQuality, "Chat luong", qualityView(m.settings.Quality)},
 		{fieldConcurrency, "Song song", concurrencyView(m.settings.Concurrency)},
+		{fieldSkipMeta, "Bo qua metadata", skipMetaView(m.settings.SkipMetadata)},
 		{fieldOutputDir, "Thu muc luu", m.settings.OutputDir},
 		{fieldArchive, "Bo qua da tai", toggleView(m.settings.UseArchive)},
 		{fieldVerbose, "Ghi log debug", verboseView(m.settings.VerboseLog)},
@@ -186,6 +190,13 @@ func (m settingsViewModel) View() string {
 	}
 
 	return header + boxStyle.Render(content) + help
+}
+
+func skipMetaView(on bool) string {
+	if on {
+		return "[ON]   " + mutedStyle.Render("nhanh hon, ten file = video ID")
+	}
+	return "[OFF]  " + mutedStyle.Render("lay title, cham hon")
 }
 
 func concurrencyView(n int) string {

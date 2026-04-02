@@ -15,6 +15,7 @@ type AppSettings struct {
 	OutputDir    string `json:"output_dir"`     // thư mục lưu video
 	UseArchive   bool   `json:"use_archive"`    // skip video đã tải
 	Concurrency  int    `json:"concurrency"`    // số lượng tải song song (batch)
+	SkipMetadata bool   `json:"skip_metadata"`  // bỏ lấy metadata, tên file = video ID
 	CookieFile   string `json:"cookie_file"`    // path tới cookies.txt (optional)
 	VerboseLog   bool   `json:"verbose_log"`    // ghi log yt-dlp ra file
 }

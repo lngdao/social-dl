@@ -541,30 +541,35 @@ func (a App) startBatchDownload(urls []string, subfolder string) tea.Cmd {
 
 		total := len(urls)
 
-		// Phase 1: Fetch all metadata in parallel (fast, no download)
+		// Phase 1: Fetch metadata (skip if setting enabled)
 		items := make([]batchItem, total)
-		var metaWg sync.WaitGroup
-		metaSem := make(chan struct{}, 5) // 5 concurrent metadata fetches
 		for i, url := range urls {
 			items[i] = batchItem{index: i, url: url, title: url}
-			metaWg.Add(1)
-			go func(idx int, u string) {
-				defer metaWg.Done()
-				metaSem <- struct{}{}
-				defer func() { <-metaSem }()
-
-				metaCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-				defer cancel()
-				meta, err := ytdlp.FetchMeta(metaCtx, paths.YtDlp, u)
-				if err == nil && meta != nil {
-					if meta.Title != "" {
-						items[idx].title = meta.Title
-					}
-					items[idx].platform = meta.Extractor
-				}
-			}(i, url)
 		}
-		metaWg.Wait()
+
+		if !settings.SkipMetadata {
+			var metaWg sync.WaitGroup
+			metaSem := make(chan struct{}, 5)
+			for i, url := range urls {
+				metaWg.Add(1)
+				go func(idx int, u string) {
+					defer metaWg.Done()
+					metaSem <- struct{}{}
+					defer func() { <-metaSem }()
+
+					metaCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+					defer cancel()
+					meta, err := ytdlp.FetchMeta(metaCtx, paths.YtDlp, u)
+					if err == nil && meta != nil {
+						if meta.Title != "" {
+							items[idx].title = meta.Title
+						}
+						items[idx].platform = meta.Extractor
+					}
+				}(i, url)
+			}
+			metaWg.Wait()
+		}
 
 		// Phase 2: Download all in parallel with concurrency limit
 		var succeeded, failed atomic.Int32
