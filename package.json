@@ -1,6 +1,6 @@
 {
   "name": "social-downloader-extension",
-  "version": "2026.402.3",
+  "version": "2026.402.4",
   "description": "Chrome extension for downloading social media content",
   "scripts": {
     "dev": "wxt",
