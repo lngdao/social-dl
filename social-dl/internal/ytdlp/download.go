@@ -36,7 +36,8 @@ func Download(ctx context.Context, opts DownloadOpts, onProgress func(Progress))
 		"-o", filepath.Join(opts.OutputDir, "%(title).80s [%(id)s].%(ext)s"),
 		"--newline",
 		"--progress",
-		"--progress-template", `download:{"status":"%(progress.status)s","percent":"%(progress._percent_str)s","speed":"%(progress._speed_str)s","eta":"%(progress._eta_str)s","downloaded":"%(progress._downloaded_bytes_str)s"}`,
+		"--color", "never",
+		"--progress-template", `download:{"_sd":true,"status":"%(progress.status)s","percent":"%(progress._percent_str)s","speed":"%(progress._speed_str)s","eta":"%(progress._eta_str)s","downloaded":"%(progress._downloaded_bytes_str)s"}`,
 		"--no-warnings",
 		"--no-playlist",
 	}
@@ -149,7 +150,8 @@ func DownloadPlaylist(ctx context.Context, opts DownloadOpts, onProgress func(Pr
 		"-o", filepath.Join(opts.OutputDir, "%(title).80s [%(id)s].%(ext)s"),
 		"--newline",
 		"--progress",
-		"--progress-template", `download:{"status":"%(progress.status)s","percent":"%(progress._percent_str)s","speed":"%(progress._speed_str)s","eta":"%(progress._eta_str)s","downloaded":"%(progress._downloaded_bytes_str)s"}`,
+		"--color", "never",
+		"--progress-template", `download:{"_sd":true,"status":"%(progress.status)s","percent":"%(progress._percent_str)s","speed":"%(progress._speed_str)s","eta":"%(progress._eta_str)s","downloaded":"%(progress._downloaded_bytes_str)s"}`,
 		"--no-warnings",
 		"--yes-playlist",
 	}
@@ -204,25 +206,29 @@ func tryParseProgress(line string, onProgress func(Progress)) {
 	if onProgress == nil {
 		return
 	}
-	// Method 1: JSON progress template "download:{...}"
-	if strings.HasPrefix(line, "download:") {
-		jsonStr := strings.TrimPrefix(line, "download:")
-		var raw struct {
-			Status     string `json:"status"`
-			Percent    string `json:"percent"`
-			Speed      string `json:"speed"`
-			ETA        string `json:"eta"`
-			Downloaded string `json:"downloaded"`
-		}
-		if json.Unmarshal([]byte(jsonStr), &raw) == nil {
-			onProgress(Progress{
-				Status:     raw.Status,
-				Percent:    parsePercent(raw.Percent),
-				Speed:      raw.Speed,
-				ETA:        raw.ETA,
-				Downloaded: raw.Downloaded,
-			})
-			return
+	// Method 1: Our JSON progress template (contains "_sd":true marker)
+	if strings.Contains(line, `"_sd":true`) {
+		// Trim any leading whitespace or stray characters
+		idx := strings.Index(line, "{")
+		if idx >= 0 {
+			jsonStr := strings.TrimSpace(line[idx:])
+			var raw struct {
+				Status     string `json:"status"`
+				Percent    string `json:"percent"`
+				Speed      string `json:"speed"`
+				ETA        string `json:"eta"`
+				Downloaded string `json:"downloaded"`
+			}
+			if json.Unmarshal([]byte(jsonStr), &raw) == nil {
+				onProgress(Progress{
+					Status:     raw.Status,
+					Percent:    parsePercent(raw.Percent),
+					Speed:      strings.TrimSpace(raw.Speed),
+					ETA:        strings.TrimSpace(raw.ETA),
+					Downloaded: strings.TrimSpace(raw.Downloaded),
+				})
+				return
+			}
 		}
 	}
 	// Method 2: Standard "[download]  45.2% of ~12.3MiB at 5.2MiB/s ETA 00:02"
