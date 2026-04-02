@@ -85,7 +85,22 @@ func Download(ctx context.Context, opts DownloadOpts, onProgress func(Progress))
 	if err != nil {
 		return "", err
 	}
-	cmd.Stderr = cmd.Stdout
+
+	// Separate stderr: write to log file if available, otherwise discard
+	if logWriter != nil {
+		stderr, _ := cmd.StderrPipe()
+		if stderr != nil {
+			go func() {
+				scanner := bufio.NewScanner(stderr)
+				scanner.Buffer(make([]byte, 256*1024), 256*1024)
+				for scanner.Scan() {
+					fmt.Fprintln(logWriter, scanner.Text())
+				}
+			}()
+		}
+	} else {
+		cmd.Stderr = nil
+	}
 
 	if err := cmd.Start(); err != nil {
 		return "", fmt.Errorf("start yt-dlp: %w", err)
