@@ -380,13 +380,13 @@ func (a App) formatSpec() string {
 	s := a.appSettings
 	switch s.Quality {
 	case "1080p":
-		return "bestvideo[height<=1080]+bestaudio/best[height<=1080]"
+		return "bestvideo[height<=1080]+bestaudio/best[height<=1080]/best"
 	case "720p":
-		return "bestvideo[height<=720]+bestaudio/best[height<=720]"
+		return "bestvideo[height<=720]+bestaudio/best[height<=720]/best"
 	case "480p":
-		return "bestvideo[height<=480]+bestaudio/best[height<=480]"
+		return "bestvideo[height<=480]+bestaudio/best[height<=480]/best"
 	case "360p":
-		return "bestvideo[height<=360]+bestaudio/best[height<=360]"
+		return "bestvideo[height<=360]+bestaudio/best[height<=360]/best"
 	default:
 		return "bestvideo*+bestaudio/best"
 	}

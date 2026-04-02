@@ -45,7 +45,7 @@ func ExtractQualities(meta *VideoMeta) []Quality {
 
 	for _, h := range heights {
 		label := fmt.Sprintf("%dp", h)
-		spec := fmt.Sprintf("bestvideo[height<=%d]+bestaudio/best[height<=%d]", h, h)
+		spec := fmt.Sprintf("bestvideo[height<=%d]+bestaudio/best[height<=%d]/best", h, h)
 		qualities = append(qualities, Quality{Label: label, FormatSpec: spec})
 	}
 
