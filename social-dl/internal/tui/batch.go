@@ -6,6 +6,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/atotto/clipboard"
 	"github.com/charmbracelet/bubbles/textarea"
 	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
@@ -115,6 +116,21 @@ func (m batchModel) Update(msg tea.Msg) (batchModel, tea.Cmd) {
 
 func (m batchModel) updateURLStep(msg tea.KeyMsg) (batchModel, tea.Cmd) {
 	switch msg.String() {
+	case "ctrl+v":
+		// Đọc clipboard trực tiếp — fix paste nhiều dòng trên Windows
+		if m.mode == batchModeInput {
+			text, err := clipboard.ReadAll()
+			if err == nil && text != "" {
+				existing := m.textarea.Value()
+				if existing != "" && !strings.HasSuffix(existing, "\n") {
+					text = "\n" + text
+				}
+				m.textarea.SetValue(existing + text)
+				m.urlCount = countURLs(m.textarea.Value())
+			}
+		}
+		return m, nil
+
 	case "tab":
 		if m.mode == batchModeInput {
 			m.mode = batchModeFile
@@ -218,7 +234,7 @@ func (m batchModel) urlsView() string {
 		content += "\n" + errorStyle.Render(m.err)
 	}
 
-	help := "\n" + helpStyle.Render("ctrl+d: tiep tuc  |  tab: chuyen mode  |  esc: quay lai")
+	help := "\n" + helpStyle.Render("ctrl+v: dan  |  ctrl+d: tiep tuc  |  tab: chuyen mode  |  esc: quay lai")
 
 	return tabs + content + help
 }
