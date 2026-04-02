@@ -9,7 +9,7 @@ export default defineConfig({
   }),
   manifest: {
     name: 'Social Downloader',
-    version: '2026.402.2',
+    version: '2026.402.3',
     permissions: ['webRequest', 'storage', 'sidePanel', 'downloads', 'offscreen'],
     host_permissions: [
       '*://*.facebook.com/*',
