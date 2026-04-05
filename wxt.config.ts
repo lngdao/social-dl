@@ -9,7 +9,7 @@ export default defineConfig({
   }),
   manifest: {
     name: 'Social-DL',
-    version: '2026.403.1',
+    version: '2026.405.1',
     permissions: ['webRequest', 'storage', 'sidePanel', 'downloads', 'offscreen'],
     host_permissions: [
       '*://*.facebook.com/*',

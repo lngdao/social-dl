@@ -1,6 +1,6 @@
 {
   "name": "social-dl",
-  "version": "2026.403.1",
+  "version": "2026.405.1",
   "description": "Download videos from 1800+ sites. Chrome extension + CLI tool.",
   "scripts": {
     "dev": "wxt",
