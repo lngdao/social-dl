@@ -84,7 +84,7 @@ echo "  wxt.config.ts"
 # ── Commit, tag, push ──
 git add package.json wxt.config.ts
 git commit -m "release: ${NEXT}"
-git tag -a "${TAG}" -m "Release ${TAG}"
+git tag -a "${TAG}" -m "${TAG}"
 git push origin HEAD "${TAG}"
 
 echo ""
