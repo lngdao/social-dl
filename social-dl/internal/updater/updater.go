@@ -11,7 +11,7 @@ import (
 	"strings"
 )
 
-const repoAPI = "https://api.github.com/repos/lngdao/social-downloader-extension/releases/latest"
+const repoAPI = "https://api.github.com/repos/lngdao/social-dl/releases/latest"
 
 type Release struct {
 	TagName string  `json:"tag_name"`

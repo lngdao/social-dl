@@ -1,7 +1,7 @@
 {
-  "name": "social-downloader-extension",
+  "name": "social-dl",
   "version": "2026.403.1",
-  "description": "Chrome extension for downloading social media content",
+  "description": "Download videos from 1800+ sites. Chrome extension + CLI tool.",
   "scripts": {
     "dev": "wxt",
     "build": "wxt build",

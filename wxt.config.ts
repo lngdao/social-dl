@@ -8,7 +8,7 @@ export default defineConfig({
     plugins: [preact(), tailwindcss()],
   }),
   manifest: {
-    name: 'Social Downloader',
+    name: 'Social-DL',
     version: '2026.403.1',
     permissions: ['webRequest', 'storage', 'sidePanel', 'downloads', 'offscreen'],
     host_permissions: [
